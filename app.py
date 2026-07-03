@@ -2335,8 +2335,26 @@ if (goalExpander) {
                 
 
                 # Render Sunburst directly
-                corp_amts = df_summary_sub.iloc[0, 1:].apply(lambda x: float(str(x).replace(',', '')) if str(x).strip() != '' else 0).tolist()
-                indi_amts = df_summary_sub.iloc[2, 1:].apply(lambda x: float(str(x).replace(',', '')) if str(x).strip() != '' else 0).tolist()
+                # Dynamically find the rows for '법인 평가금액' and '개인 평가금액'
+                corp_row_idx = None
+                indi_row_idx = None
+                for i in range(len(df_dash)):
+                    row_name = str(df_dash.iloc[i, 0]).replace(' ', '')
+                    if '법인평가금액' in row_name:
+                        corp_row_idx = i
+                    elif '개인평가금액' in row_name:
+                        indi_row_idx = i
+
+                if corp_row_idx is not None:
+                    corp_amts = df_dash.iloc[corp_row_idx, 1:7].apply(lambda x: float(str(x).replace(',', '')) if str(x).strip() != '' else 0).tolist()
+                else:
+                    corp_amts = [0] * len(cats)
+
+                if indi_row_idx is not None:
+                    indi_amts = df_dash.iloc[indi_row_idx, 1:7].apply(lambda x: float(str(x).replace(',', '')) if str(x).strip() != '' else 0).tolist()
+                else:
+                    indi_amts = [0] * len(cats)
+
                 labels = ["총자산"]
                 parents = [""]
                 values = [0]
@@ -2348,12 +2366,12 @@ if (goalExpander) {
                     values.append(0)
                     colors.append(color_map.get(cat, '#888888'))
                 for i, cat in enumerate(cats):
-                    if indi_amts[i] > 0:
+                    if i < len(indi_amts) and indi_amts[i] > 0:
                         labels.append(f"개인_{cat}")
                         parents.append(cat)
                         values.append(indi_amts[i])
                         colors.append(color_map['개인'])
-                    if corp_amts[i] > 0:
+                    if i < len(corp_amts) and corp_amts[i] > 0:
                         labels.append(f"법인_{cat}")
                         parents.append(cat)
                         values.append(corp_amts[i])
