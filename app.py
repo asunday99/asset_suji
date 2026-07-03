@@ -141,7 +141,7 @@ if not st.session_state.authenticated:
     </style>
     
     <div class="pin-container">
-        <div class="oracle-title">ASSET<span style="margin-left: -1pt;"> </span>333</div>
+        <div class="oracle-title">ASSET<span style="margin-left: -1pt;"> </span>SUJI</div>
         <div class="pin-subtitle">Infinite Asset Expansion</div>
     </div>
     ''', unsafe_allow_html=True)
@@ -485,7 +485,7 @@ st.markdown('''
 
 with st.sidebar:
     manual_md = '''
-<div style="text-align: center; font-size: 1.8rem; font-weight: 900; font-family: 'Gothic A1', sans-serif; margin-bottom: 10px; letter-spacing: 0px; background: radial-gradient(circle, #FFE4A0 0%, #A78E5C 75%, #7d6a45 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; color: transparent;">ASSET 333</div>
+<div style="text-align: center; font-size: 1.8rem; font-weight: 900; font-family: 'Gothic A1', sans-serif; margin-bottom: 10px; letter-spacing: 0px; background: radial-gradient(circle, #FFE4A0 0%, #A78E5C 75%, #7d6a45 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; color: transparent;">ASSET SUJI</div>
 <div style="margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); text-align: center; font-size: 0.85rem; font-family: 'Gothic A1', sans-serif; font-weight: 700; background: radial-gradient(circle, #FFE4A0 0%, #A78E5C 75%, #7d6a45 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; color: transparent; line-height: 1.5; letter-spacing: -0.5px;">
 이 앱은 구글시트에 기록된 방대한 데이터를<br>한눈에 시각화하고 관리할 목적으로 제작되었습니다
 </div>
