@@ -1,0 +1,2412 @@
+import streamlit as st
+import pandas as pd
+import yfinance as yf
+
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from logic import *
+import yfinance as yf
+import numpy as np
+import datetime
+import calendar
+import holidays
+import urllib.request
+import io
+import requests
+import json
+from streamlit_option_menu import option_menu
+import plotly.express as px
+import logging
+logger = __import__('logging').getLogger(__name__)
+
+if 'gs_val' not in st.session_state:
+    st.session_state.gs_val = 100
+if 'ty_val' not in st.session_state:
+    import datetime
+    st.session_state.ty_val = datetime.date.today().year + 5
+
+st.set_page_config(page_title="금융 자산 대시보드", layout="wide", initial_sidebar_state="collapsed")
+
+# === [보안 PIN 잠금 화면 로직] ===
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.markdown('''
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Gothic+A1:wght@700;900&display=swap');
+    /* 배경: 완전한 블랙에서 아주 깊은 남색 그라데이션 */
+    .stApp {
+        background: #000000;
+    }
+    
+    /* 화면 중앙 컨테이너 */
+    .pin-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        margin-top: 15vh;
+        color: white;
+    }
+    
+    /* 야광 점멸 애니메이션 정의 (연보라 & 주황 믹스) */
+    @keyframes neonBreathe {
+        0%, 12.5%, 100% {
+            text-shadow: 0 0 8.5px rgba(150, 185, 235, 0.95), 0 0 17px rgba(150, 185, 235, 0.75), 0 0 25.5px rgba(150, 185, 235, 0.55);
+            color: #C8DCF8;
+            opacity: 1;
+        }
+        62.5% {
+            text-shadow: 0 0 4px rgba(150, 185, 235, 0.25), 0 0 8px rgba(150, 185, 235, 0.1);
+            color: #C8DCF8;
+            opacity: 0.5;
+        }
+    }
+
+    /* 타이틀 텍스트 (흰색 기본 + 야광 애니메이션) */
+    .oracle-title {
+        font-size: clamp(3.0rem, 13vw, 4.5rem);
+        font-weight: 900;
+        letter-spacing: 2px;
+        white-space: nowrap;
+        margin-bottom: 5px;
+        text-align: center;
+        font-family: 'Gothic A1', 'Arial Black', sans-serif;
+        animation: neonBreathe 8.0s infinite ease-in-out;
+    }
+    
+    .pin-subtitle {
+        font-size: 1.0rem;
+        margin-bottom: 40px;
+        text-align: center;
+        letter-spacing: 2px;
+        font-family: 'Gothic A1', sans-serif;
+        font-weight: 700;
+        
+        /* 글자 내부 중앙에 맺히는 빛 (텍스트 밖으로 새어나가지 않음) */
+        background: radial-gradient(circle, #FFE4A0 0%, #A78E5C 75%, #7d6a45 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        color: transparent;
+    }
+
+    /* 입력창 중앙 정렬 (PC: 대제목 'ASSET 333' 가로 길이에 맞춤) */
+    div[data-testid="stTextInput"] {
+        width: 420px !important;
+        margin: 0 auto !important;
+    }
+
+    @media (max-width: 768px) {
+        .pin-subtitle {
+            font-size: 0.8rem;
+            letter-spacing: 1.6px;
+        }
+        /* 모바일은 PC 설정을 덮어쓰고 모바일 대제목(3.0rem) 가로 길이에 맞춤 */
+        div[data-testid="stTextInput"] {
+            width: 280px !important;
+        }
+    }
+    
+    /* 텍스트 인풋 디자인 */
+    div[data-baseweb="input"] {
+        background-color: rgba(20, 20, 30, 0.8) !important;
+        border: 1px solid rgba(184, 154, 255, 0.3) !important;
+        border-radius: 20px !important;
+        transition: all 0.3s ease;
+    }
+    
+    /* 텍스트 인풋 포커스 시 샴페인 골드 네온 띠 */
+    div[data-baseweb="input"]:focus-within {
+        border-color: #E1C387 !important;
+        box-shadow: 0 0 20px rgba(225, 195, 135, 0.4) !important;
+        background-color: rgba(0, 0, 0, 0.9) !important;
+    }
+
+    div[data-baseweb="input"] input {
+        color: white !important;
+        font-size: 3rem !important;
+        text-align: center !important;
+        letter-spacing: 25px !important;
+        caret-color: #E1C387 !important;
+        padding: 20px !important;
+    }
+
+    /* "Press Enter to apply" 문구 숨김 */
+    div[data-testid="InputInstructions"] {
+        display: none !important;
+    }
+    </style>
+    
+    <div class="pin-container">
+        <div class="oracle-title">ASSET<span style="margin-left: -1pt;"> </span>333</div>
+        <div class="pin-subtitle">Infinite Asset Expansion</div>
+    </div>
+    ''', unsafe_allow_html=True)
+    
+    st.write("<br>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        pin = st.text_input("PIN", type="password", label_visibility="collapsed", key="pin_input")
+        if pin:
+            app_pin = ""
+            try:
+                # secrets에서 PIN을 가져옴. 없으면 "1234"
+                app_pin = str(st.secrets.get("APP_PIN", "1234"))
+            except:
+                app_pin = "1234"
+                
+            if pin == app_pin:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("❌ 비밀번호가 틀렸습니다.")
+    st.stop()
+# =================================
+
+
+# 사이버펑크 & Glassmorphism 글로벌 CSS 주입
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@700&display=swap');
+
+    /* Force pure black background */
+    .stApp, [data-testid="stAppViewContainer"] {
+        background: #000000 !important;
+        background-color: #000000 !important;
+    }
+    
+    /* Glassmorphism 카드 컨테이너 */
+    .glass-card {
+        background: rgba(26, 17, 42, 0.7);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 153, 0, 0.15);
+        border-radius: 20px;
+        padding: 40px;
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+        margin-top: 20px;
+        margin-bottom: 20px;
+        transition: all 0.3s ease;
+    }
+    .glass-card:hover {
+        border: 1px solid rgba(255, 153, 0, 0.4);
+        box-shadow: 0 8px 32px 0 rgba(255, 153, 0, 0.1);
+    }
+
+    @keyframes neonPulseBlueWhite {
+        0%, 100% {
+            text-shadow: 0 0 8.5px rgba(205, 216, 241, 0.68), 0 0 17px rgba(205, 216, 241, 0.51), 0 0 25.5px rgba(205, 216, 241, 0.34);
+            color: #CDD8F1;
+            opacity: 1;
+        }
+        50% {
+            text-shadow: 0 0 5px rgba(138, 180, 248, 0.5), 0 0 10px rgba(138, 180, 248, 0.3);
+            color: #C0D8FF;
+            opacity: 0.85;
+        }
+    }
+
+    @keyframes neonPulseZeroCoolBlue {
+        0%, 100% {
+            text-shadow: 0 0 10px rgba(138, 180, 248, 0.8), 0 0 20px rgba(138, 180, 248, 0.6), 0 0 30px rgba(138, 180, 248, 0.4);
+            color: #C0D8FF;
+            opacity: 1;
+        }
+        50% {
+            text-shadow: 0 0 5px rgba(138, 180, 248, 0.4), 0 0 10px rgba(138, 180, 248, 0.2);
+            color: #C0D8FF;
+            opacity: 0.7;
+        }
+    }
+    .neon-zero-blue {
+        animation: neonPulseZeroCoolBlue 3.45s infinite ease-in-out;
+    }
+
+    @keyframes progressBarPulse {
+        0%, 100% { box-shadow: 0 0 9px rgba(255, 218, 185, 0.8), 0 0 18px rgba(255, 218, 185, 0.5); }
+        50% { box-shadow: 0 0 4px rgba(255, 218, 185, 0.4), 0 0 9px rgba(255, 218, 185, 0.2); }
+    }
+    
+    .progress-fill-peach {
+        background: linear-gradient(90deg, #7d6a45 0%, #A78E5C 60%, #FFE4A0 100%);
+        height: 100%;
+        border-radius: 8px;
+        position: absolute;
+        top: 0;
+        left: 0;
+        animation: progressBarPulse 2s infinite ease-in-out;
+    }
+
+    .progress-track-blue {
+        width: 100%;
+        border-radius: 8px;
+        height: 8px;
+        margin-top: 15px;
+        margin-bottom: 12px;
+        position: relative;
+        background-color: rgba(100, 181, 246, 0.45);
+        box-shadow: inset 0 0 10px rgba(100, 181, 246, 0.8), 0 0 5px rgba(100, 181, 246, 0.4);
+    }
+
+    .glass-card-premium-blue {
+        position: relative;
+        background: 
+            radial-gradient(ellipse 120px 8px at 50% 0%, rgba(240, 248, 255, 1.0) 0%, rgba(220, 240, 255, 0.6) 50%, transparent 100%),
+            radial-gradient(ellipse 120px 8px at 0% 0%, rgba(240, 248, 255, 1.0) 0%, rgba(220, 240, 255, 0.6) 50%, transparent 100%),
+            radial-gradient(ellipse 120px 8px at 100% 0%, rgba(240, 248, 255, 1.0) 0%, rgba(220, 240, 255, 0.6) 50%, transparent 100%),
+            linear-gradient(180deg, rgba(10, 20, 40, 0.05) 0%, rgba(5, 10, 20, 0.3) 100%);
+        backdrop-filter: blur(25px);
+        -webkit-backdrop-filter: blur(25px);
+        border: 1px solid rgba(138, 180, 248, 0.8);
+        border-top: 2px solid rgba(255, 255, 255, 0.9);
+        border-radius: 12px;
+        box-shadow: 
+            inset 0 0 60px rgba(138, 180, 248, 0.7), 
+            inset 0 0 15px rgba(255, 255, 255, 0.4), 
+            0 10px 40px rgba(0,0,0,0.9);
+        transition: all 0.3s ease;
+    }
+    
+    .glass-card-premium-blue::before {
+        content: '';
+        position: absolute;
+        top: 6px;
+        left: 6px;
+        right: 6px;
+        bottom: 6px;
+        border: 1px solid rgba(138, 180, 248, 0.4);
+        border-radius: 8px;
+        pointer-events: none;
+    }
+
+    .glass-card-premium-gold {
+        position: relative;
+        background: 
+            radial-gradient(ellipse 150px 10px at 50% 0%, rgba(240, 248, 255, 0.8) 0%, rgba(220, 240, 255, 0.64) 50%, transparent 100%),
+            radial-gradient(ellipse 150px 10px at 0% 0%, rgba(240, 248, 255, 0.8) 0%, rgba(220, 240, 255, 0.64) 50%, transparent 100%),
+            radial-gradient(ellipse 150px 10px at 100% 0%, rgba(240, 248, 255, 0.8) 0%, rgba(220, 240, 255, 0.64) 50%, transparent 100%),
+            radial-gradient(ellipse 150px 10px at 50% 100%, rgba(240, 248, 255, 0.8) 0%, rgba(220, 240, 255, 0.64) 50%, transparent 100%),
+            radial-gradient(ellipse 150px 10px at 0% 100%, rgba(240, 248, 255, 0.8) 0%, rgba(220, 240, 255, 0.64) 50%, transparent 100%),
+            radial-gradient(ellipse 150px 10px at 100% 100%, rgba(240, 248, 255, 0.8) 0%, rgba(220, 240, 255, 0.64) 50%, transparent 100%),
+            linear-gradient(180deg, rgba(10, 20, 40, 0.05) 0%, rgba(5, 10, 20, 0.3) 100%);
+        backdrop-filter: blur(25px);
+        -webkit-backdrop-filter: blur(25px);
+        border: 1px solid rgba(225, 195, 135, 0.8);
+        border-top: 2px solid rgba(255, 255, 255, 0.9);
+        border-radius: 12px;
+        box-shadow: 
+            inset 0 0 60px rgba(225, 195, 135, 0.7), 
+            inset 0 0 15px rgba(255, 255, 255, 0.4), 
+            0 10px 40px rgba(0,0,0,0.9);
+        transition: all 0.3s ease;
+    }
+    
+    @media (max-width: 820px) {
+        .glass-card-premium-blue {
+            padding-bottom: 30px !important;
+            min-height: 230px !important;
+        }
+        .glass-card-premium-gold {
+            min-height: 230px !important;
+        }
+    }
+    
+    .glass-card-premium-gold::before {
+        content: '';
+        position: absolute;
+        top: 6px;
+        left: 6px;
+        right: 6px;
+        bottom: 6px;
+        border: 1px solid rgba(225, 195, 135, 0.4);
+        border-radius: 8px;
+        pointer-events: none;
+    }
+
+    .neon-pulse-blue {
+        font-family: 'Oswald', sans-serif;
+        font-size: clamp(32px, 11.5vw, 49px);
+        font-weight: 800;
+        text-align: center;
+        margin: 15px 0 25px 0;
+        letter-spacing: -1px;
+        white-space: nowrap;
+        animation: neonPulseBlueWhite 3.45s infinite ease-in-out;
+    }
+
+    /* 핵심 결과값 텍스트 (네온 글로우 효과) */
+    .neon-result {
+        font-size: 4.5rem;
+        font-weight: 900;
+        color: #FF9900;
+        text-align: center;
+        text-shadow: 0 0 10px rgba(255, 153, 0, 0.6), 
+                     0 0 20px rgba(255, 153, 0, 0.4), 
+                     0 0 40px rgba(255, 107, 0, 0.2);
+        margin: 10px 0;
+        line-height: 1.2;
+    }
+
+    /* 서브 타이틀 및 라벨 */
+    .sub-label {
+        font-size: 1.2rem;
+        color: #A0A0A0;
+        text-align: center;
+        margin-bottom: 5px;
+    }
+
+    /* Streamlit 슬라이더 테마 커스텀 (CSS override) */
+
+    /* 탭 디자인 커스텀 */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 20px;
+        background-color: transparent;
+    }
+    .stTabs [data-baseweb="tab"] {
+        color: #A0A0A0;
+        font-size: 1.1rem;
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #FF9900 !important;
+        border-bottom-color: #FF9900 !important;
+    }
+
+        /* V5 CSS */
+        .marquee-wrapper { width: 100%; overflow: hidden; background: rgba(255, 107, 0, 0.1); padding: 8px 0; border-top: 1px solid rgba(255,107,0,0.3); border-bottom: 1px solid rgba(255,107,0,0.3); margin-bottom: 25px; }
+        .marquee-content { display: inline-block; white-space: nowrap; animation: marquee 20s linear infinite; color: #FF6B00; font-weight: bold; font-size: 14px; letter-spacing: 2px; }
+        @keyframes marquee { 0% { transform: translateX(100vw); } 100% { transform: translateX(-100%); } }
+        .glass-card { background: rgba(26, 17, 42, 0.8); backdrop-filter: blur(16px); border: 1px solid rgba(255, 107, 0, 0.2); border-radius: 18px; padding: 20px; margin-bottom: 20px; }
+        .swipe-container { display: flex; overflow-x: auto; gap: 15px; padding-bottom: 15px; scroll-snap-type: x mandatory; scrollbar-width: none; scrollbar-color: rgba(255, 107, 0, 0.5) rgba(255, 255, 255, 0.05); padding-top:10px; }
+        .swipe-container::-webkit-scrollbar { display: none !important; }
+
+
+
+        .macro-card { flex: 0 0 auto; width: 40vw; max-width: 140px; scroll-snap-align: start; text-align: center; padding: 15px 10px; margin-bottom: 0; }
+        .asset-card { flex: 0 0 auto; width: 85vw; max-width: 320px; scroll-snap-align: start; margin-bottom: 0; position: relative; }
+        .neon-text { font-size: 38px; font-weight: 900; color: #FF6B00; text-shadow: 0 0 10px rgba(255, 107, 0, 0.6); margin: 5px 0; }
+        .profit-positive { color: #00E676; font-weight: bold; }
+        .profit-negative { color: #00BFFF; font-weight: bold; }
+        .progress-bar-container { background-color: rgba(255,255,255,0.1); height: 10px; border-radius: 5px; width: 100%; margin-top: 20px; overflow: hidden; }
+        .progress-bar-fill { background-color: #FF6B00; height: 10px; border-radius: 5px; }
+        /* Hover Effects */
+        .hover-macro:hover { transform: translateY(-5px) scale(1.02); box-shadow: 0 10px 25px rgba(255, 255, 255, 0.2); border-color: white; }
+        .hover-stock:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(30, 55, 153, 0.8); border-color: #1e3799; }
+        .hover-gold:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(241, 196, 15, 0.8); border-color: #f1c40f; }
+        .hover-bond:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(0, 216, 214, 0.8); border-color: #00d8d6; }
+        .hover-coin:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(255, 107, 0, 0.8); border-color: #FF6B00; }
+        .hover-cash:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(108, 92, 231, 0.8); border-color: #6c5ce7; }
+
+    </style>
+""", unsafe_allow_html=True)
+
+if "google_sheets" in st.secrets:
+    URL_DASHBOARD = st.secrets["google_sheets"]["URL_DASHBOARD"]
+    URL_ACCOUNT = st.secrets["google_sheets"]["URL_ACCOUNT"]
+    URL_CALENDAR = st.secrets["google_sheets"]["URL_CALENDAR"]
+    URL_RECORDS = st.secrets["google_sheets"]["URL_RECORDS"]
+    URL_PNL_DAILY = st.secrets["google_sheets"]["URL_PNL_DAILY"]
+    URL_PNL_MONTHLY = st.secrets["google_sheets"]["URL_PNL_MONTHLY"]
+else:
+    st.error("Google Sheets URL 설정이 필요합니다. `.streamlit/secrets.toml` 파일을 확인해주세요.")
+    st.stop()
+
+# 로직 함수는 logic.py에서 import 됨
+def format_styler(styler):
+    def custom_formatter(x):
+        if pd.isna(x) or str(x).strip() in ['', 'nan', 'NaN', 'None']:
+            return ''
+        x_str = str(x).strip()
+        if '%' in x_str:
+            return x_str
+        try:
+            val = float(x_str.replace(',', ''))
+            return f"{val:,.0f}"
+        except ValueError:
+            return x_str
+            
+    return styler.format(formatter=custom_formatter)
+
+# --- Right Sidebar Manual ---
+st.markdown('''
+    <style>
+        /* Move sidebar to the right */
+        [data-testid="stSidebar"] {
+            left: auto !important;
+            right: 0 !important;
+            border-left: 1px solid #333;
+            border-right: none;
+        }
+        /* Move sidebar toggle button to the top right, near Deploy */
+        [data-testid="collapsedControl"] {
+            left: auto !important;
+            right: 80px !important;
+            top: 10px !important;
+            z-index: 999999 !important;
+            background-color: #000000;
+            border-radius: 5px;
+        }
+        /* Adjust main area padding when right sidebar is expanded */
+        [data-testid="stSidebarExpanded"] + section {
+            margin-left: 0 !important;
+            margin-right: 21rem !important;
+        }
+    
+        /* V5 CSS */
+        .marquee-wrapper { width: 100%; overflow: hidden; background: rgba(255, 107, 0, 0.1); padding: 8px 0; border-top: 1px solid rgba(255,107,0,0.3); border-bottom: 1px solid rgba(255,107,0,0.3); margin-bottom: 25px; }
+        .marquee-content { display: inline-block; white-space: nowrap; animation: marquee 20s linear infinite; color: #FF6B00; font-weight: bold; font-size: 14px; letter-spacing: 2px; }
+        @keyframes marquee { 0% { transform: translateX(100vw); } 100% { transform: translateX(-100%); } }
+        .glass-card { background: rgba(26, 17, 42, 0.8); backdrop-filter: blur(16px); border: 1px solid rgba(255, 107, 0, 0.2); border-radius: 18px; padding: 20px; margin-bottom: 20px; }
+        .swipe-container { display: flex; overflow-x: auto; gap: 15px; padding-bottom: 15px; scroll-snap-type: x mandatory; scrollbar-width: none; scrollbar-color: rgba(255, 107, 0, 0.5) rgba(255, 255, 255, 0.05); padding-top:10px; }
+        .swipe-container::-webkit-scrollbar { display: none !important; }
+        
+        
+        
+        .macro-card { flex: 0 0 auto; width: 40vw; max-width: 140px; scroll-snap-align: start; text-align: center; padding: 15px 10px; margin-bottom: 0; }
+        .asset-card { flex: 0 0 auto; width: 85vw; max-width: 320px; scroll-snap-align: start; margin-bottom: 0; position: relative; }
+        .neon-text { font-size: 38px; font-weight: 900; color: #FF6B00; text-shadow: 0 0 10px rgba(255, 107, 0, 0.6); margin: 5px 0; }
+        .profit-positive { color: #00E676; font-weight: bold; }
+        .profit-negative { color: #00BFFF; font-weight: bold; }
+        .progress-bar-container { background-color: rgba(255,255,255,0.1); height: 10px; border-radius: 5px; width: 100%; margin-top: 20px; overflow: hidden; }
+        .progress-bar-fill { background-color: #FF6B00; height: 10px; border-radius: 5px; }
+        /* Hover Effects */
+        .hover-macro:hover { transform: translateY(-5px) scale(1.02); box-shadow: 0 10px 25px rgba(255, 255, 255, 0.2); border-color: white; }
+        .hover-stock:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(30, 55, 153, 0.8); border-color: #1e3799; }
+        .hover-gold:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(241, 196, 15, 0.8); border-color: #f1c40f; }
+        .hover-bond:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(0, 216, 214, 0.8); border-color: #00d8d6; }
+        .hover-coin:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(255, 107, 0, 0.8); border-color: #FF6B00; }
+        .hover-cash:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(108, 92, 231, 0.8); border-color: #6c5ce7; }
+
+    </style>
+''', unsafe_allow_html=True)
+
+with st.sidebar:
+    manual_md = '''
+<div style="text-align: center; font-size: 1.8rem; font-weight: 900; font-family: 'Gothic A1', sans-serif; margin-bottom: 10px; letter-spacing: 0px; background: radial-gradient(circle, #FFE4A0 0%, #A78E5C 75%, #7d6a45 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; color: transparent;">ASSET 333</div>
+<div style="margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); text-align: center; font-size: 0.85rem; font-family: 'Gothic A1', sans-serif; font-weight: 700; background: radial-gradient(circle, #FFE4A0 0%, #A78E5C 75%, #7d6a45 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; color: transparent; line-height: 1.5; letter-spacing: -0.5px;">
+이 앱은 구글시트에 기록된 방대한 데이터를<br>한눈에 시각화하고 관리할 목적으로 제작되었습니다
+</div>
+
+**<span style="color: #8AB4F8;">대시보드 (총 금융자산)</span>**  
+**= 평가수익 + 확정수익**
+* <span style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.6);">*평가수익*: 주식가치를 평가한 장부상 수익</span>
+* <span style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.6);">*확정수익*: 주식매도후 통장에 들어온 수익</span>
+
+---
+
+**<span style="color: #8AB4F8;">매매기록</span>**  
+**= 확정수익 기록**
+* <span style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.6);">달력을 누르면 해당일의 매매 손익이 얼마인지 볼 수 있어요</span>
+'''
+    st.markdown(manual_md, unsafe_allow_html=True)
+# ----------------------------
+
+menu_options = ["대시보드", "매매 기록"]
+
+if "menu_selection" not in st.session_state:
+    page_from_url = st.query_params.get("page", "대시보드")
+    st.session_state.menu_selection = page_from_url if page_from_url in menu_options else "대시보드"
+if "record_tab" not in st.session_state:
+    st.session_state.record_tab = "매매 캘린더"
+if "pnl_tab" not in st.session_state:
+    st.session_state.pnl_tab = "일별 손익"
+
+default_index = menu_options.index(st.session_state.menu_selection)
+
+st.markdown("""
+    <style>
+        div[data-testid="stElementContainer"]:has(iframe[title="streamlit_option_menu.option_menu"]) {
+            position: sticky;
+            top: 60px;
+            z-index: 999;
+            background-color: #000000;
+            padding-top: 10px;
+            padding-bottom: 5px;
+        }
+        @media (max-width: 820px) {
+            div[data-testid="stElementContainer"]:has(iframe[title="streamlit_option_menu.option_menu"]) {
+                margin-bottom: -25px !important;
+            }
+        }
+    
+        /* V5 CSS */
+        .marquee-wrapper { width: 100%; overflow: hidden; background: rgba(255, 107, 0, 0.1); padding: 8px 0; border-top: 1px solid rgba(255,107,0,0.3); border-bottom: 1px solid rgba(255,107,0,0.3); margin-bottom: 25px; }
+        .marquee-content { display: inline-block; white-space: nowrap; animation: marquee 20s linear infinite; color: #FF6B00; font-weight: bold; font-size: 14px; letter-spacing: 2px; }
+        @keyframes marquee { 0% { transform: translateX(100vw); } 100% { transform: translateX(-100%); } }
+        .glass-card { background: rgba(26, 17, 42, 0.8); backdrop-filter: blur(16px); border: 1px solid rgba(255, 107, 0, 0.2); border-radius: 18px; padding: 20px; margin-bottom: 20px; }
+        .swipe-container { display: flex; overflow-x: auto; gap: 15px; padding-bottom: 15px; scroll-snap-type: x mandatory; scrollbar-width: none; scrollbar-color: rgba(255, 107, 0, 0.5) rgba(255, 255, 255, 0.05); padding-top:10px; }
+        .swipe-container::-webkit-scrollbar { display: none !important; }
+        
+        
+        
+        .macro-card { flex: 0 0 auto; width: 40vw; max-width: 140px; scroll-snap-align: start; text-align: center; padding: 15px 10px; margin-bottom: 0; }
+        .asset-card { flex: 0 0 auto; width: 85vw; max-width: 320px; scroll-snap-align: start; margin-bottom: 0; position: relative; }
+        .neon-text { font-size: 38px; font-weight: 900; color: #FF6B00; text-shadow: 0 0 10px rgba(255, 107, 0, 0.6); margin: 5px 0; }
+        .profit-positive { color: #00E676; font-weight: bold; }
+        .profit-negative { color: #00BFFF; font-weight: bold; }
+        .progress-bar-container { background-color: rgba(255,255,255,0.1); height: 10px; border-radius: 5px; width: 100%; margin-top: 20px; overflow: hidden; }
+        .progress-bar-fill { background-color: #FF6B00; height: 10px; border-radius: 5px; }
+        /* Hover Effects */
+        .hover-macro:hover { transform: translateY(-5px) scale(1.02); box-shadow: 0 10px 25px rgba(255, 255, 255, 0.2); border-color: white; }
+        .hover-stock:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(30, 55, 153, 0.8); border-color: #1e3799; }
+        .hover-gold:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(241, 196, 15, 0.8); border-color: #f1c40f; }
+        .hover-bond:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(0, 216, 214, 0.8); border-color: #00d8d6; }
+        .hover-coin:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(255, 107, 0, 0.8); border-color: #FF6B00; }
+        .hover-cash:hover { transform: translateY(-8px); box-shadow: 0 15px 35px rgba(108, 92, 231, 0.8); border-color: #6c5ce7; }
+
+    </style>
+""", unsafe_allow_html=True)
+
+menu = option_menu(
+    menu_title=None, 
+    options=menu_options, 
+    icons=['', ''], 
+    menu_icon="cast", 
+    default_index=default_index, 
+    orientation="horizontal",
+    styles={
+        "container": {
+            "padding": "0!important", 
+            "background-color": "transparent", 
+            "border": "none", 
+            "margin-bottom": "25px", 
+            "max-width": "250px", 
+            "margin-left": "0"
+        },
+        "icon": {"display": "none"}, 
+        "nav-link": {
+            "font-size": "16px", 
+            "font-weight": "500", 
+            "text-align": "center", 
+            "margin":"0px", 
+            "padding": "8px 0px", 
+            "--hover-color": "transparent", 
+            "color": "#7a828e", 
+            "border-radius": "0px"
+        },
+        "nav-link-selected": {
+            "background-color": "transparent", 
+            "color": "#e5e7eb", 
+            "font-weight": "bold", 
+            "border-bottom": "2px solid #8ab4f8",
+            "box-shadow": "0px 10px 15px -10px rgba(138, 180, 248, 0.5)"
+        },
+    }
+)
+
+if menu != st.session_state.menu_selection:
+    st.session_state.menu_selection = menu
+    st.query_params["page"] = menu
+    st.rerun()
+
+# ── [모바일 풀너비 강제] JS로 Streamlit 부모 DOM 직접 조작 ──────────────
+import streamlit.components.v1 as _components
+_components.html('''
+<script>
+(function() {
+    function applyMobileFix() {
+        var doc = window.parent.document;
+        var isMobile = window.parent.innerWidth <= 820;
+        if (!isMobile) return;
+
+        // 1) 모든 가능한 block-container 선택자 순서대로 시도
+        var selectors = [
+            '[data-testid="stAppViewBlockContainer"]',
+            '[data-testid="stMainBlockContainer"]',
+            '.stMainBlockContainer',
+            '.block-container',
+            'section[data-testid="stMain"] > div > div > div'
+        ];
+        selectors.forEach(function(sel) {
+            var els = doc.querySelectorAll(sel);
+            els.forEach(function(el) {
+                el.style.setProperty('max-width', '100vw', 'important');
+                el.style.setProperty('width', '100%', 'important');
+                el.style.setProperty('padding-left', '0.6rem', 'important');
+                el.style.setProperty('padding-right', '0.6rem', 'important');
+                el.style.setProperty('padding-top', '0.5rem', 'important');
+                el.style.setProperty('margin-left', '0', 'important');
+                el.style.setProperty('margin-right', '0', 'important');
+                el.style.setProperty('box-sizing', 'border-box', 'important');
+            });
+        });
+
+        // 2) stMain 섹션 자체 패딩 제거
+        var mainSections = doc.querySelectorAll('section[data-testid="stMain"]');
+        mainSections.forEach(function(el) {
+            el.style.setProperty('padding-left', '0', 'important');
+            el.style.setProperty('padding-right', '0', 'important');
+            el.style.setProperty('width', '100vw', 'important');
+        });
+
+        // 3) stApp 루트도 처리
+        var appRoot = doc.querySelector('.stApp');
+        if (appRoot) {
+            appRoot.style.setProperty('width', '100vw', 'important');
+            appRoot.style.setProperty('overflow-x', 'hidden', 'important');
+        }
+
+        // 4) 달력 상단 메뉴 모바일에서 세로로 깨지는 현상 방지 (gap 초과 회피 방식)
+        var buttons = Array.from(doc.querySelectorAll('button'));
+        var prevBtn = buttons.find(b => b.innerText && b.innerText.includes('◄'));
+        if (prevBtn) {
+            var hzBlock = prevBtn.closest('[data-testid="stHorizontalBlock"]');
+            if (hzBlock) {
+                hzBlock.style.setProperty('flex-wrap', 'nowrap', 'important');
+                var cols = hzBlock.children;
+                if(cols.length >= 3) {
+                    cols[0].style.setProperty('width', 'auto', 'important');
+                    cols[0].style.setProperty('flex', '1 1 0%', 'important');
+                    cols[0].style.setProperty('min-width', '0', 'important');
+                    
+                    cols[1].style.setProperty('width', 'auto', 'important');
+                    cols[1].style.setProperty('flex', '6 1 0%', 'important');
+                    cols[1].style.setProperty('min-width', '0', 'important');
+                    
+                    cols[2].style.setProperty('width', 'auto', 'important');
+                    cols[2].style.setProperty('flex', '1 1 0%', 'important');
+                    cols[2].style.setProperty('min-width', '0', 'important');
+                }
+            }
+        }
+    }
+
+    // 즉시 실행
+    applyMobileFix();
+    // 100ms / 500ms / 1500ms 후 재실행 (Streamlit 렌더링 타이밍 대응)
+    setTimeout(applyMobileFix, 100);
+    setTimeout(applyMobileFix, 500);
+    setTimeout(applyMobileFix, 1500);
+
+    // MutationObserver: Streamlit 재렌더링 때마다 자동 재적용
+    var observer = new MutationObserver(function() {
+        applyMobileFix();
+    });
+    observer.observe(window.parent.document.body, {
+        childList: true,
+        subtree: true,
+        attributes: false
+    });
+})();
+</script>
+''', height=0)
+# ===== Imported Functions from app_8507.py =====
+import logging
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+# 포맷팅 및 유틸 함수들은 logic.py에서 import 됨
+
+def render_trade_records(urls: dict):
+    """매매 기록 탭 - 미래에셋 스타일 UI"""
+    import datetime
+    
+    # ── 세션 상태 초기화 ──────────────────────────────────────────
+    if "trade_view_mode" not in st.session_state:
+        st.session_state.trade_view_mode = "월별"
+    if "trade_nav_year" not in st.session_state:
+        st.session_state.trade_nav_year = datetime.date.today().year
+    if "trade_nav_month" not in st.session_state:
+        st.session_state.trade_nav_month = datetime.date.today().month
+    if "show_perf_chart" not in st.session_state:
+        st.session_state.show_perf_chart = False
+    if "record_tab" not in st.session_state:
+        st.session_state.record_tab = "매매 캘린더"
+
+    # ── 최대 폭 제한 ───────────────────────────────────────────────
+    st.markdown("""
+    <style>
+    /* 매매기록 탭 반응형 너비 */
+    .block-container {
+        max-width: min(1200px, 90vw) !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        padding-top: 2rem !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+    </style>
+    <div style="width: 100%;">
+    """, unsafe_allow_html=True)
+
+    # ── 이번 달 수익 계산 (매매기록 시트에서 직접 집계, 날짜 정확 연동) ────────────────
+    import datetime as _dt
+    _month_profit = 0
+    _today = _dt.date.today()
+    try:
+        _df_rec_hdr = load_records_data(urls.get("RECORDS", ""))
+        if not _df_rec_hdr.empty and "날짜" in _df_rec_hdr.columns and "차익실현금액" in _df_rec_hdr.columns:
+            _df_rec_hdr["계좌"] = _df_rec_hdr["계좌"].astype(str).str.strip()
+            _df_rec_hdr["날짜"] = _df_rec_hdr["날짜"].astype(str).str.strip()
+            # 모의계산 제외
+            _hdr_real = _df_rec_hdr[
+                (_df_rec_hdr["계좌"] != "모의계산") & (_df_rec_hdr["날짜"] != "모의계산")
+            ].copy()
+            _hdr_real["_hdr_date"] = pd.to_datetime(
+                _hdr_real["날짜"].str.replace(" ", ""), format="%y.%m.%d.", errors="coerce"
+            ).dt.date
+            _hdr_real["차익실현금액"] = pd.to_numeric(
+                _hdr_real["차익실현금액"].astype(str).str.replace(",", ""), errors="coerce"
+            ).fillna(0)
+            # 오늘 날짜와 일치하는 행만 합산 (연/월 정확 매칭)
+            _this_month_hdr = _hdr_real[
+                _hdr_real["_hdr_date"].apply(
+                    lambda d: d is not None and not pd.isna(d)
+                    and d.year == _today.year and d.month == _today.month
+                )
+            ]
+            _month_profit = int(_this_month_hdr["차익실현금액"].sum())
+            _prev_month_date = (_today.replace(day=1) - _dt.timedelta(days=1))
+            _prev_month_hdr = _hdr_real[
+                _hdr_real["_hdr_date"].apply(
+                    lambda d: d is not None and not pd.isna(d)
+                    and d.year == _prev_month_date.year and d.month == _prev_month_date.month
+                )
+            ]
+            _prev_month_profit = int(_prev_month_hdr["차익실현금액"].sum())
+    except Exception:
+        _month_profit = 0
+        _prev_month_profit = 0
+
+    if _month_profit > 0:
+        _profit_text = f"+{_month_profit:,}원"
+        _profit_class = "neon-zero-blue"
+        _profit_color = ""
+        _msg = f"전월 {_prev_month_profit:,}원"
+        _expander_title = "여기를 눌러보세요"
+    elif _month_profit < 0:
+        _profit_text = f"{_month_profit:,}원"
+        _profit_class = "neon-zero-blue"
+        _profit_color = ""
+        _msg = f"전월 {_prev_month_profit:,}원"
+        _expander_title = "여기를 눌러보세요"
+    else:
+        _profit_text = "0원"
+        _profit_class = "neon-zero-blue"
+        _profit_color = ""
+        _msg = f"전월 {_prev_month_profit:,}원"
+        _expander_title = "여기를 눌러보세요"
+
+    # 이번 달 남은 일수 계산 (월말 기준 D-day)
+    import calendar
+    import datetime as _dt
+    _today_date = _dt.date.today()
+    _last_day = calendar.monthrange(_today_date.year, _today_date.month)[1]
+    d_days_dynamic = _last_day - _today_date.day
+
+    # ── 임팩트 있는 이번 달 수익 헤더 ──────────────────────────────────────
+    st.markdown(f"""
+<div class='glass-card-premium-gold' style='padding: 24px; padding-bottom:30px; margin-bottom: 0;'>
+<div style="text-align:center; padding-top:10px;">
+<div style="font-size:15px; color:#8ab4f8; font-weight:bold; margin-bottom:6px; letter-spacing:1px;">이번달 확정수익 &nbsp;|&nbsp; <span style="color:#FFFFFF; background-color:rgba(138,180,248,0.2); padding:2px 10px; border-radius:10px; font-weight:900;">D-{d_days_dynamic}</span></div>
+<div class='{_profit_class}' style='{_profit_color} font-family:"Oswald", sans-serif; font-size:clamp(32px, 11.5vw, 49px); font-weight:900; letter-spacing:-1px; margin: 15px 0 25px 0; white-space:nowrap;'>{_profit_text}</div>
+<div style="font-size:13px; color:#FFDAB9; font-weight:bold; display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; letter-spacing:0.5px;">
+<span style="color:#FFDAB9;">{_msg}</span>
+</div>
+</div>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── 매매 캘린더 ─────────────────────────────────────────────────
+    with st.expander(_expander_title, expanded=False):
+        st.components.v1.html(f'''<script>
+const elements = parent.document.querySelectorAll('div[data-testid="stExpander"] details summary p');
+elements.forEach(el => {{
+    if (el.innerText.includes("{_expander_title}")) {{
+        el.style.fontSize = "80%";
+        el.style.opacity = "1.0";
+    }}
+}});
+</script>''', height=0)
+        df_rec = load_records_data(urls.get("RECORDS", ""))
+        _render_trade_calendar(df_rec)
+
+    # ── 연간 실현수익 & 수익률 버블차트 (좌우 병렬) ─────────────────────────────────────────
+    try:
+        import datetime as _dt2
+        import math as _math
+
+        # ── 1) 일별 시트에서 월별 실현손익 집계 ──
+        _df_daily_chart = load_and_clean_data(urls.get("DAILY", ""))
+        _year_profit_c = 0
+        _monthly_profits_c = {i: 0 for i in range(1, 13)}
+        if not _df_daily_chart.empty:
+            _dc2 = _df_daily_chart.columns[0]
+            _pc2 = next((c for c in _df_daily_chart.columns if "실현손익" in str(c).replace(" ", "")), None)
+            if _pc2:
+                _tmp2 = _df_daily_chart.copy()
+                _tmp2['_date2'] = pd.to_datetime(
+                    _tmp2[_dc2].astype(str).str.replace(' ', ''), format='%y.%m.%d.', errors='coerce'
+                )
+                _tmp2[_pc2] = pd.to_numeric(_tmp2[_pc2].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                _tmp2 = _tmp2.dropna(subset=['_date2'])
+                _cur_year = _dt2.date.today().year
+                _year_rows = _tmp2[_tmp2['_date2'].dt.year == _cur_year]
+                for _, _row in _year_rows.iterrows():
+                    _m = _row['_date2'].month
+                    _val = int(_row[_pc2])
+                    _monthly_profits_c[_m] = _monthly_profits_c.get(_m, 0) + _val
+                    _year_profit_c += _val
+
+        # ── 2) 매매기록 시트에서 월별 수익률 & 건수 집계 ──
+        _df_rec_chart = load_records_data(urls.get("RECORDS", ""))
+        _monthly_rates_c2 = {i: [] for i in range(1, 13)}
+        _monthly_counts_c2 = {i: 0 for i in range(1, 13)}
+        if not _df_rec_chart.empty and "날짜" in _df_rec_chart.columns and "수익률" in _df_rec_chart.columns:
+            _df_rec_chart["_rc_date"] = pd.to_datetime(
+                _df_rec_chart["날짜"].astype(str).str.replace(" ", ""), format="%y.%m.%d.", errors="coerce"
+            )
+            _df_rec_chart["_rc_rate"] = pd.to_numeric(
+                _df_rec_chart["수익률"].astype(str).str.replace(",", ""), errors="coerce"
+            )
+            _rc_year = _dt2.date.today().year
+            _rc_rows = _df_rec_chart.dropna(subset=["_rc_date", "_rc_rate"])
+            _rc_rows = _rc_rows[_rc_rows["_rc_date"].dt.year == _rc_year]
+            if "계좌" in _rc_rows.columns:
+                _rc_rows = _rc_rows[_rc_rows["계좌"].astype(str).str.strip() != "모의계산"]
+            for _, _rr in _rc_rows.iterrows():
+                _rm = _rr["_rc_date"].month
+                _rv = float(_rr["_rc_rate"])
+                if _rv != 0:
+                    _monthly_rates_c2[_rm].append(_rv)
+                    _monthly_counts_c2[_rm] += 1
+
+        # 월별 평균 수익률
+        _monthly_avg_rates2 = {}
+        for _mi in range(1, 13):
+            if _monthly_rates_c2[_mi]:
+                _monthly_avg_rates2[_mi] = sum(_monthly_rates_c2[_mi]) / len(_monthly_rates_c2[_mi])
+            else:
+                _monthly_avg_rates2[_mi] = 0.0
+
+        # YTD 전체 평균
+        _all_rates2 = [r for rates in _monthly_rates_c2.values() for r in rates]
+        _ytd_val = sum(_all_rates2) / len(_all_rates2) if _all_rates2 else 0.0
+        _ytd = f"+{_ytd_val:.2f}%" if _ytd_val > 0 else f"{_ytd_val:.2f}%"
+
+        # ── 3) 에리어차트 SVG 생성 함수 (대시보드와 동일한 스타일) ──
+        def _make_area_svg(data_dict, c_left, c_right, y_fmt, chart_idx, c_bottom_right=None):
+            W, H = 460, 200
+            PAD_L, PAD_R, PAD_T, PAD_B = 48, 16, 20, 36
+            plot_w = W - PAD_L - PAD_R
+            plot_h = H - PAD_T - PAD_B
+            months = sorted([m for m in range(1, 13) if data_dict.get(m, 0) != 0])
+            if not months:
+                return f'<svg viewBox="0 0 {W} {H}" style="width:100%;height:auto;display:block;"><rect width="{W}" height="{H}" fill="transparent" rx="10"/><text x="{W//2}" y="{H//2}" fill="#555" text-anchor="middle" font-size="13">데이터 없음</text></svg>'
+            
+            vals = [data_dict.get(m, 0) for m in months]
+            y_max = max(vals) if max(vals) > 0 else 0
+            y_min = min(vals) if min(vals) < 0 else 0
+            
+            y_range = max(y_max - y_min, 1)
+            y_max = y_max + y_range * 0.15
+            y_min = y_min - y_range * 0.15
+            y_range = max(y_max - y_min, 1)
+            
+            def xp(idx): return PAD_L + int(idx / max(len(months) - 1, 1) * plot_w)
+            def yp(v): return PAD_T + int((1 - (v - y_min) / y_range) * plot_h)
+            
+            pts = [(xp(i), yp(data_dict.get(m, 0))) for i, m in enumerate(months)]
+            y0 = H - PAD_B
+            area_pts = f"{PAD_L},{y0} " + " ".join(f"{x},{y}" for x, y in pts) + f" {pts[-1][0]},{y0}"
+            line_pts = " ".join(f"{x},{y}" for x, y in pts)
+            
+            grad_id = f"grad_trade_{chart_idx}"
+            mask_id = f"mask_trade_{chart_idx}"
+            svg = f'<svg viewBox="0 0 {W} {H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">'
+            svg += f'<defs>'
+            svg += f'  <linearGradient id="{grad_id}" x1="0%" y1="0%" x2="100%" y2="0%">'
+            svg += f'    <stop offset="0%" stop-color="{c_left}"/>'
+            svg += f'    <stop offset="100%" stop-color="{c_right}"/>'
+            svg += f'  </linearGradient>'
+            svg += f'  <radialGradient id="light_trade_{chart_idx}" cx="100%" cy="0%" r="80%">'
+            svg += f'    <stop offset="0%" stop-color="#ffffff" stop-opacity="0.85"/>'
+            svg += f'    <stop offset="100%" stop-color="transparent" stop-opacity="0.0"/>'
+            svg += f'  </radialGradient>'
+            if c_bottom_right:
+                svg += f'  <radialGradient id="mint_trade_{chart_idx}" cx="90%" cy="65%" r="60%">'
+                svg += f'    <stop offset="0%" stop-color="{c_bottom_right}" stop-opacity="0.42"/>'
+                svg += f'    <stop offset="100%" stop-color="transparent" stop-opacity="0.0"/>'
+                svg += f'  </radialGradient>'
+            svg += f'  <linearGradient id="fade_{mask_id}" x1="0%" y1="0%" x2="0%" y2="100%">'
+            svg += f'    <stop offset="0%" stop-color="white" stop-opacity="1.0"/>'
+            svg += f'    <stop offset="40%" stop-color="white" stop-opacity="0.7"/>'
+            svg += f'    <stop offset="85%" stop-color="white" stop-opacity="0.0"/>'
+            svg += f'    <stop offset="100%" stop-color="white" stop-opacity="0.0"/>'
+            svg += f'  </linearGradient>'
+            svg += f'  <mask id="{mask_id}">'
+            svg += f'    <rect width="{W}" height="{H}" fill="url(#fade_{mask_id})" />'
+            svg += f'  </mask>'
+            svg += f'</defs>'
+            svg += f'<rect width="{W}" height="{H}" fill="transparent" rx="10"/>'
+            for gi in range(5):
+                gy = PAD_T + int(gi / 4 * plot_h)
+                svg += f'<line x1="{PAD_L}" y1="{gy}" x2="{W-PAD_R}" y2="{gy}" stroke="#333" stroke-width="1"/>'
+            svg += f'<polygon points="{area_pts}" fill="url(#{grad_id})" mask="url(#{mask_id})"/>'
+            if c_bottom_right:
+                svg += f'<polygon points="{area_pts}" fill="url(#mint_trade_{chart_idx})" mask="url(#{mask_id})"/>'
+            svg += f'<polygon points="{area_pts}" fill="url(#light_trade_{chart_idx})" mask="url(#{mask_id})"/>'
+            svg += f'<polyline points="{line_pts}" fill="none" stroke="#ffffff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 0 4px rgba(255,255,255,0.6))"/>'
+            
+            for i, (m, (x, y)) in enumerate(zip(months, pts)):
+                svg += f'<circle cx="{x}" cy="{y}" r="4" fill="#ffffff" stroke="#111" stroke-width="1.5"/>'
+                lbl = y_fmt(data_dict.get(m, 0))
+                svg += f'<text x="{x}" y="{y-15}" fill="#ffffff" text-anchor="middle" font-size="13" font-weight="bold" style="text-shadow: 0px 1px 3px rgba(0,0,0,0.9);">{lbl}</text>'
+                svg += f'<text x="{x}" y="{H-PAD_B+14}" fill="#888" text-anchor="middle" font-size="11">{m}월</text>'
+            svg += '</svg>'
+            return svg
+
+        # ── 4) 차트1 에리어 SVG (수익금) ──
+        _svg1 = _make_area_svg(_monthly_profits_c, "#9E65B7", "#88C6E3", lambda v: f"{int(v/10000):,}만" if abs(v) >= 10000 else f"{int(v):,}", 1)
+
+        # ── 5) 차트2 에리어 SVG (평균수익률) ──
+        _svg2 = _make_area_svg(_monthly_avg_rates2, "#B76CDF", "#A9CC97", lambda v: f"{v:.1f}%", 2, "#95D5B2")
+
+        # ── 6) 좌우 병렬 HTML 렌더링 ──
+        _chart_html = f"""
+<div style='display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap;'>
+  <div style='flex:1;min-width:280px;background:#000000;border:1px solid rgba(255, 218, 185, 0.5);border-radius:12px;padding:18px 16px 12px 16px;'>
+    <div style='margin-bottom:16px; white-space:nowrap;'>
+      <span style='color:#FFDAB9; font-size:14px; font-weight:300;'>올해 확정수익은 </span>
+      <span style='color:rgba(245, 245, 245, 0.85); font-size:20px; font-weight:900;'>{_year_profit_c:,}</span>
+      <span style='color:#FFDAB9; font-size:14px; font-weight:300;'> 원 이에요</span>
+    </div>
+    {_svg1}
+  </div>
+  <div style='flex:1;min-width:280px;background:#000000;border:1px solid rgba(255, 218, 185, 0.5);border-radius:12px;padding:18px 16px 12px 16px;'>
+    <div style='margin-bottom:16px; white-space:nowrap;'>
+      <span style='color:#FFDAB9; font-size:14px; font-weight:300;'>매매수익률은 평균 </span>
+      <span style='color:rgba(245, 245, 245, 0.85); font-size:20px; font-weight:900;'>{_ytd}</span>
+      <span style='color:#FFDAB9; font-size:14px; font-weight:300;'> 이에요</span>
+    </div>
+    {_svg2}
+  </div>
+</div>
+"""
+        st.markdown(_chart_html, unsafe_allow_html=True)
+    except Exception:
+        pass
+
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def _render_trade_calendar(df_rec: pd.DataFrame):
+    """매매 캘린더 렌더링 - 화살표 버튼으로 월 이동, 1개 달력 표시."""
+    today = datetime.date.today()
+    kr_holidays = holidays.KR()
+    daily_pnl_dict: dict = {}
+
+    # ── 데이터 파싱 ──────────────────────────────────────────────────
+    if not df_rec.empty:
+        try:
+            df_rec["계좌"]    = df_rec["계좌"].astype(str).str.strip()
+            df_rec["날짜_str"] = df_rec["날짜"].astype(str).str.strip()
+            is_mock  = (df_rec["계좌"] == "모의계산") | (df_rec["날짜_str"] == "모의계산")
+            df_real  = df_rec[~is_mock].copy()
+            if "날짜" in df_real.columns and "차익실현금액" in df_real.columns:
+                df_real["date"] = pd.to_datetime(
+                    df_real["날짜_str"].str.replace(" ", ""), format="%y.%m.%d.", errors="coerce"
+                ).dt.date
+                df_real["차익실현금액"] = pd.to_numeric(
+                    df_real["차익실현금액"].astype(str).str.replace(",", ""), errors="coerce"
+                ).fillna(0)
+                daily_pnl_dict = df_real.groupby("date")["차익실현금액"].sum().to_dict()
+        except Exception as e:
+            logger.warning("캘린더 데이터 파싱 실패: %s", e)
+
+    # ── session_state로 현재 표시 월 관리 ───────────────────────────
+    # ── 절대 연월 방식으로 변경 (오류 방지) ──
+    _CAL_YEAR_KEY  = "_trade_cal_year"
+    _CAL_MONTH_KEY = "_trade_cal_month"
+    _MIN_YEAR, _MIN_MONTH = 2026, 1
+    _MAX_YEAR, _MAX_MONTH = today.year, today.month  # 상한 = 오늘 달
+
+    if _CAL_YEAR_KEY not in st.session_state:
+        st.session_state[_CAL_YEAR_KEY]  = _MAX_YEAR
+        st.session_state[_CAL_MONTH_KEY] = _MAX_MONTH
+
+    _disp_year  = st.session_state[_CAL_YEAR_KEY]
+    _disp_month = st.session_state[_CAL_MONTH_KEY]
+
+    # 화살표 버튼
+    _prev_disabled = (_disp_year, _disp_month) <= (_MIN_YEAR, _MIN_MONTH)
+    _next_disabled = (_disp_year, _disp_month) >= (_MAX_YEAR, _MAX_MONTH)
+
+    _col_prev, _col_title, _col_next = st.columns([1, 6, 1])
+    with _col_prev:
+        if st.button("◄", key="_cal_prev_btn", help="이전 달", disabled=_prev_disabled):
+            _nm = _disp_month - 1
+            _ny = _disp_year
+            if _nm < 1:
+                _nm = 12
+                _ny -= 1
+            st.session_state[_CAL_YEAR_KEY]  = _ny
+            st.session_state[_CAL_MONTH_KEY] = _nm
+            st.rerun()
+    with _col_next:
+        if st.button("►", key="_cal_next_btn", help="다음 달", disabled=_next_disabled):
+            _nm = _disp_month + 1
+            _ny = _disp_year
+            if _nm > 12:
+                _nm = 1
+                _ny += 1
+            st.session_state[_CAL_YEAR_KEY]  = _ny
+            st.session_state[_CAL_MONTH_KEY] = _nm
+            st.rerun()
+
+    # 표시월 재가져오기 (rerun 후)
+    _disp_year  = st.session_state[_CAL_YEAR_KEY]
+    _disp_month = st.session_state[_CAL_MONTH_KEY]
+
+    with _col_title:
+        _monthly_total_nav = sum(v for k, v in daily_pnl_dict.items() if k.year == _disp_year and k.month == _disp_month)
+        _nav_color = "#FF4B4B" if _monthly_total_nav > 0 else ("#4B9FFF" if _monthly_total_nav < 0 else "#888")
+        _nav_sign  = "+" if _monthly_total_nav > 0 else ""
+        st.markdown(
+            f"<div style='text-align:center;font-size:clamp(16px, 4.5vw, 20px);font-weight:900;color:#fff;padding-top:6px;line-height:1.2;'>"
+            f"<span class='hide-on-mobile'>{str(_disp_year)[:2]}</span>{str(_disp_year)[2:]}년 {_disp_month}월 "
+            f"<span style='color:{_nav_color};font-size:clamp(15px, 4.2vw, 18px); margin-left:4px;'>{_nav_sign}{_monthly_total_nav:,.0f}원</span></div>",
+            unsafe_allow_html=True
+        )
+
+    # ── 달력 HTML 생성 (Cosmic Trophy Calendar) ──────────────────────
+    cal_obj = calendar.Calendar(firstweekday=6)
+    weeks = cal_obj.monthdatescalendar(_disp_year, _disp_month)
+
+    # 주말(토,일) 모바일 숨김 처리 및 모바일 전용 텍스트 숨김 CSS 추가
+    tbl  = '<style>\n'
+    tbl += '@media (max-width: 820px) {\n'
+    tbl += '    #trade-calendar-table th:nth-child(1), #trade-calendar-table td:nth-child(1),\n'
+    tbl += '    #trade-calendar-table th:nth-child(7), #trade-calendar-table td:nth-child(7) {\n'
+    tbl += '        display: none !important;\n'
+    tbl += '    }\n'
+    tbl += '    .hide-on-mobile { display: none !important; }\n'
+    tbl += '    #trade-calendar-table .cal-cell {\n'
+    tbl += '        height: auto !important;\n'
+    tbl += '        min-height: 50px !important;\n'
+    tbl += '        padding: 6px 2px !important;\n'
+    tbl += '    }\n'
+    tbl += '    #trade-calendar-table .cal-cell .profit-text {\n'
+    tbl += '        margin-top: 6px !important;\n'
+    tbl += '    }\n'
+    tbl += '}\n'
+    tbl += '</style>\n'
+    tbl += '<table id="trade-calendar-table" style="width:100%;table-layout:fixed;border-collapse:separate;border-spacing:6px;margin-top:10px;">'
+    tbl += "<tr>"
+    for day_name in ["일", "월", "화", "수", "목", "금", "토"]:
+        tbl += f'<th style="color:#A0C0FF;padding:8px 0;text-align:center;font-size:13px;font-weight:bold;letter-spacing:1px;border-bottom:1px solid rgba(138, 180, 248, 0.2);">{day_name}</th>'
+    tbl += "</tr>"
+    for week in weeks:
+        tbl += "<tr>"
+        for d in week:
+            if d.month != _disp_month:
+                tbl += '<td style="border:none;background:transparent;"></td>'
+                continue
+
+            day_text = str(d.day)
+            is_holiday = d in kr_holidays
+            val = daily_pnl_dict.get(d, 0)
+            
+            # Base Tile Styles (Blue Hologram)
+            base_bg = "linear-gradient(135deg, rgba(138, 180, 248, 0.08), rgba(10, 20, 40, 0.6))"
+            border_style = "1px solid rgba(138, 180, 248, 0.2)"
+            box_shadow = "box-shadow: inset 0 0 10px rgba(138, 180, 248, 0.1);"
+            
+            profit_html = ""
+            
+            if val > 0:
+                # Trophy Style (Blue & Cream Hologram)
+                base_bg = "radial-gradient(circle at top left, rgba(255, 218, 185, 0.2), rgba(138, 180, 248, 0.15)), linear-gradient(135deg, rgba(10, 20, 40, 0.8), rgba(0, 0, 0, 0.9))"
+                border_style = "1px solid rgba(255, 218, 185, 0.5)"
+                box_shadow = "box-shadow: 0 0 12px rgba(138, 180, 248, 0.2), inset 0 0 15px rgba(255, 218, 185, 0.15);"
+                profit_html = f"<div class='profit-text' style='margin-top:14px; font-size:clamp(8.5px, 2.5vw, 17px); font-weight:900; color:#FFDAB9; text-shadow: 0 0 8px rgba(255, 218, 185, 0.7); letter-spacing:-1px; word-break:break-all; line-height:1.1;'>+{val:,.0f}</div>"
+            elif val < 0:
+                # Loss Style (Blue Button)
+                base_bg = "radial-gradient(circle at top right, rgba(138, 180, 248, 0.25), transparent), linear-gradient(135deg, rgba(10, 20, 50, 0.8), rgba(0, 5, 15, 0.9))"
+                border_style = "1px solid rgba(138, 180, 248, 0.4)"
+                box_shadow = "box-shadow: 0 0 12px rgba(138, 180, 248, 0.3), inset 0 0 15px rgba(138, 180, 248, 0.15);"
+                profit_html = f"<div class='profit-text' style='margin-top:14px; font-size:clamp(8.5px, 2.5vw, 14px); font-weight:bold; color:#4B9FFF; text-shadow: 0 0 8px rgba(75, 159, 255, 0.5); letter-spacing:-1px; word-break:break-all; line-height:1.1;'>{val:,.0f}</div>"
+            elif is_holiday:
+                profit_html = f"<div class='profit-text' style='margin-top:14px; font-size:12px; font-weight:bold; color:#666666;'>휴장</div>"
+            else:
+                profit_html = f"<div class='profit-text' style='margin-top:14px; font-size:12px; color:transparent;'>-</div>"
+
+            day_color = "#FFDAB9" if val > 0 else "#8ab4f8"
+
+            cell_style = f"height:85px; border-radius:12px; background:{base_bg}; border:{border_style}; {box_shadow} backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); text-align:center; vertical-align:top; padding:8px 4px; transition:all 0.1s ease; cursor:pointer;"
+            
+            # Modal 데이터를 위한 속성 (날짜, 수익금액)
+            date_str = f"{_disp_year}년 {_disp_month}월 {d.day}일"
+            if val > 0: val_str = f"+{val:,.0f}원"
+            elif val < 0: val_str = f"{val:,.0f}원"
+            elif is_holiday: val_str = "휴장"
+            else: val_str = "매매 없음"
+            
+            cell_id = f"calcell__{date_str}__{val_str}"
+            
+            # 클릭 시 애니메이션
+            tbl += f'<td class="cal-cell" id="{cell_id}" style="{cell_style}" onmousedown="this.style.transform=\'scale(0.92)\';" onmouseup="this.style.transform=\'scale(1)\';" onmouseleave="this.style.transform=\'scale(1)\';" ontouchstart="this.style.transform=\'scale(0.92)\';" ontouchend="this.style.transform=\'scale(1)\';">'
+            tbl += f'<div style="font-size:13px; font-weight:bold; color:{day_color}; text-align:left; padding-left:4px; opacity:0.85; pointer-events:none;">{day_text}</div>'
+            # profit_html에 직접 pointer-events:none; 삽입 (이중 style 속성 방지)
+            profit_html = profit_html.replace("style='", "style='pointer-events:none; ")
+            tbl += profit_html
+            tbl += '</td>'
+        tbl += "</tr>"
+    tbl += "</table>"
+    
+    # 모달(팝업) HTML 정의 (들여쓰기 없이 작성하여 st.markdown이 코드블록으로 인식하지 않게 함)
+    modal_html = """
+<div id="calModalOverlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.75); z-index:999999; justify-content:center; align-items:center; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); opacity:0; transition:opacity 0.2s ease;">
+<div id="calModalBox" style="background:linear-gradient(135deg, rgba(20, 30, 50, 0.95), rgba(10, 15, 25, 0.98)); border:1px solid rgba(138, 180, 248, 0.4); border-radius:20px; padding:35px 25px; width:85%; max-width:320px; text-align:center; box-shadow:0 15px 35px rgba(0,0,0,0.5), inset 0 0 15px rgba(138,180,248,0.15); transform:scale(0.95); transition:transform 0.2s ease;">
+<div id="calModalDate" style="color:#A0C0FF; font-size:15px; font-weight:bold; margin-bottom:10px; letter-spacing:1px; text-transform:uppercase;"></div>
+<div id="calModalProfit" style="font-size:32px; font-weight:900; margin-bottom:30px; word-break:keep-all; letter-spacing:-1px;"></div>
+<button id="calModalCloseBtn" style="background:rgba(138, 180, 248, 0.15); border:1px solid rgba(138, 180, 248, 0.5); color:#fff; padding:12px 0; border-radius:12px; font-size:16px; font-weight:bold; cursor:pointer; width:100%; transition:all 0.2s;">닫기</button>
+</div>
+</div>
+"""
+    st.markdown(tbl + modal_html, unsafe_allow_html=True)
+
+    # 이벤트 리스너 JS 주입
+    import streamlit.components.v1 as _comp
+    _comp.html('''
+    <script>
+    (function() {
+        var doc = window.parent.document;
+        if(doc.calModalInited) return; 
+        doc.calModalInited = true;
+        
+        doc.body.addEventListener('click', function(e) {
+            var td = e.target.closest('td[id^="calcell__"]');
+            if(td) {
+                var parts = td.id.split('__');
+                if(parts.length >= 3) {
+                    var dateStr = parts[1];
+                    var profitStr = parts[2];
+                    
+                    var modal = doc.getElementById('calModalOverlay');
+                    var box = doc.getElementById('calModalBox');
+                    var dateEl = doc.getElementById('calModalDate');
+                    var profitEl = doc.getElementById('calModalProfit');
+                    
+                    if(modal && dateEl && profitEl && box) {
+                        dateEl.innerText = dateStr;
+                        profitEl.innerText = profitStr;
+                        
+                        if (profitStr.includes('+')) {
+                            profitEl.style.color = '#FFDAB9';
+                            profitEl.style.textShadow = '0 0 15px rgba(255, 218, 185, 0.4)';
+                            profitEl.style.fontSize = '32px';
+                        } else if (profitStr !== '휴장' && profitStr !== '매매 없음') {
+                            profitEl.style.color = '#4B9FFF';
+                            profitEl.style.textShadow = '0 0 15px rgba(75, 159, 255, 0.4)';
+                            profitEl.style.fontSize = '32px';
+                        } else {
+                            profitEl.style.color = '#888';
+                            profitEl.style.textShadow = 'none';
+                            profitEl.style.fontSize = '16px';
+                        }
+                        
+                        modal.style.display = 'flex';
+                        setTimeout(function() {
+                            modal.style.opacity = '1';
+                            box.style.transform = 'scale(1)';
+                        }, 10);
+                    }
+                }
+            }
+            
+            if(e.target.closest('#calModalCloseBtn') || e.target.id === 'calModalOverlay') {
+                var modal = doc.getElementById('calModalOverlay');
+                var box = doc.getElementById('calModalBox');
+                if(modal && box) {
+                    modal.style.opacity = '0';
+                    box.style.transform = 'scale(0.95)';
+                    setTimeout(function() {
+                        modal.style.display = 'none';
+                    }, 200); 
+                }
+            }
+        });
+    })();
+    </script>
+    ''', height=0)
+
+def _render_trade_table(df_rec: pd.DataFrame):
+    """매매 기록 표 및 모의계산 렌더링."""
+    if df_rec.empty:
+        st.info("매매 기록 데이터가 없습니다.")
+        return
+
+    df_rec = df_rec.drop(columns=[c for c in df_rec.columns if "기타" in str(c)], errors="ignore")
+    df_rec["계좌"] = df_rec["계좌"].astype(str).str.strip()
+    df_rec["날짜"] = df_rec["날짜"].astype(str).str.strip()
+    is_mock = (df_rec["계좌"] == "모의계산") | (df_rec["날짜"] == "모의계산")
+    df_real = df_rec[~is_mock]
+    df_mock = df_rec[is_mock]
+
+    numeric_cols = df_rec.select_dtypes(include=["float", "int"]).columns.tolist()
+
+    def apply_style(df_to_style: pd.DataFrame):
+        styler         = df_to_style.style
+        num_cols_here  = [c for c in numeric_cols if c in df_to_style.columns]
+        if "수익률" in num_cols_here:
+            styler = styler.format("{:,.2f}", subset=["수익률"], na_rep="")
+            others = [c for c in num_cols_here if c != "수익률"]
+            if others:
+                styler = styler.format("{:,.0f}", subset=others, na_rep="")
+        elif num_cols_here:
+            styler = styler.format("{:,.0f}", subset=num_cols_here, na_rep="")
+
+        if "차익실현금액" in df_to_style.columns:
+            def color_profit(val):
+                if isinstance(val, (int, float)):
+                    if val > 0: return "background-color: #990000;"
+                    if val < 0: return "background-color: #1155cc;"
+                return ""
+            styler = styler.map(color_profit, subset=["차익실현금액"])
+
+        if "날짜" in df_to_style.columns and len(df_to_style) > 0:
+            try:
+                dates = pd.to_datetime(
+                    df_to_style["날짜"].astype(str).str.replace(" ", ""), format="%y.%m.%d.", errors="coerce"
+                )
+                max_date_str = (
+                    df_to_style.loc[dates.idxmax(), "날짜"] if dates.notna().any()
+                    else df_to_style["날짜"].max()
+                )
+
+                def highlight_recent(row):
+                    return ["background-color: #38761d;" if str(row.get("날짜", "")) == str(max_date_str) else ""] * len(row)
+                styler = styler.apply(highlight_recent, axis=1)
+            except Exception as e:
+                logger.warning("최신 날짜 하이라이트 실패: %s", e)
+        return styler
+
+    st.subheader("📋 매매 기록")
+    if not df_real.empty:
+        st.dataframe(apply_style(df_real), use_container_width=True, hide_index=True)
+    else:
+        st.info("실제 매매 기록이 없습니다.")
+
+    st.markdown("---")
+    st.subheader("💡 모의계산")
+    mock_cols = ["종목명", "매수_수량", "매수_단가", "매수_금액", "매도_수량", "매도_단가", "매도_금액", "매매비용", "차익실현금액", "수익률"]
+
+    if "mock_data" not in st.session_state:
+        st.session_state.mock_data = df_mock[[c for c in mock_cols if c in df_mock.columns]].copy()
+
+    edited_mock = st.data_editor(
+        apply_style(st.session_state.mock_data),
+        num_rows="dynamic", hide_index=True, use_container_width=True,
+        disabled=["매수_금액", "매도_금액", "차익실현금액", "수익률"],
+        key="mock_data_editor",
+    )
+
+    changed = False
+    for i, row in edited_mock.iterrows():
+        try:
+            b_qty = safe_int_float(row.get("매수_수량", 0))
+            old_b = safe_int_float(st.session_state.mock_data.at[i, "매수_수량"]) if i in st.session_state.mock_data.index else 0
+            s_qty = b_qty if b_qty != old_b else safe_int_float(row.get("매도_수량", 0))
+            if b_qty != old_b:
+                edited_mock.at[i, "매도_수량"] = s_qty
+                changed = True
+
+            b_prc = safe_int_float(row.get("매수_단가", 0))
+            s_prc = safe_int_float(row.get("매도_단가", 0))
+            cost  = safe_int_float(row.get("매매비용", 0))
+            n_buy  = b_qty * b_prc
+            n_sell = s_qty * s_prc
+            n_prof = n_sell - n_buy - cost
+            n_rate = (n_prof / n_buy * 100) if n_buy > 0 else 0.0
+
+            if (abs(safe_int_float(row.get("매수_금액", 0)) - n_buy) > 0.01 or
+                abs(safe_int_float(row.get("매도_금액", 0)) - n_sell) > 0.01 or
+                abs(safe_int_float(row.get("차익실현금액", 0)) - n_prof) > 0.01 or
+                abs(safe_int_float(row.get("수익률", 0)) - n_rate) > 0.01):
+                edited_mock.at[i, "매수_금액"]    = n_buy
+                edited_mock.at[i, "매도_금액"]    = n_sell
+                edited_mock.at[i, "차익실현금액"] = n_prof
+                edited_mock.at[i, "수익률"]       = n_rate
+                changed = True
+        except Exception as e:
+            logger.warning("모의계산 행 %d 계산 실패: %s", i, e)
+
+    if edited_mock.isnull().values.any():
+        edited_mock = edited_mock.fillna(0)
+        if "종목명" in edited_mock.columns:
+            edited_mock["종목명"] = edited_mock["종목명"].replace(0, "")
+        changed = True
+
+    if changed:
+        st.session_state.mock_data = edited_mock
+        st.rerun()
+
+
+# get_cached_previous_close는 logic.py에서 import 됨
+
+# =============================================================================
+# ── 탭 4: 손익 현황 ──
+# =============================================================================
+# 손익 테이블 스타일링 함수는 logic.py에서 import 됨
+
+def _render_pnl_bar_chart(df: pd.DataFrame, title: str):
+    """손익 막대 차트 렌더링."""
+    if df.empty:
+        st.info("차트 데이터가 없습니다.")
+        return
+    try:
+        date_col   = df.columns[0]
+        profit_col = next((c for c in df.columns if "실현손익" in str(c).replace(" ", "")), None)
+        if not profit_col:
+            profit_col = next((c for c in df.columns if "손익" in str(c)), None)
+        if not profit_col:
+            st.warning("손익 컬럼을 찾을 수 없습니다.")
+            return
+
+        df_chart = df[df[date_col].astype(str).str.strip() != "총계"].copy()
+        df_chart = df_chart.iloc[::-1]
+        if len(df_chart) > 30:
+            df_chart = df_chart.tail(30)
+
+        df_chart[profit_col] = pd.to_numeric(df_chart[profit_col], errors="coerce").fillna(0)
+        text_labels = [format_kr_amount(v) for v in df_chart[profit_col]]
+
+        fig = px.bar(df_chart, x=date_col, y=profit_col, text=text_labels)
+        fig.update_traces(
+            marker_color=["#ff4757" if v > 0 else "#1e90ff" for v in df_chart[profit_col]],
+            textfont_size=11, textangle=0, textposition="outside", cliponaxis=False,
+        )
+        fig.update_layout(
+            title=title,
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#d2d2d2"),
+            xaxis_title="", yaxis_title="",
+            margin=dict(l=20, r=20, t=40, b=20),
+            showlegend=False, height=350, yaxis_tickformat=",.0f",
+        )
+        fig.update_xaxes(showgrid=False)
+        fig.update_yaxes(showgrid=True, gridcolor="rgba(255,255,255,0.1)")
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        logger.error("손익 차트 렌더링 실패: %s", e)
+        st.error(f"❌ 차트 렌더링 실패: {e}")
+
+def render_pnl(urls: dict):
+    """손익 현황 탭 렌더링."""
+    pnl_tab = option_menu(
+        None, ["일별 손익", "월별 손익"],
+        icons=['', '', ''],
+        default_index=0 if st.session_state.pnl_tab == "일별 손익" else 1,
+        orientation="horizontal",
+        styles={
+            "container": {"padding": "0!important", "background-color": "#111111", "border": "1px solid #333333", "border-radius": "8px", "margin-bottom": "15px", "max-width": "300px"},
+            "nav-link": {"font-size": "14px", "text-align": "center", "margin": "0px", "padding": "8px", "--hover-color": "#222222", "color": "#d0d0d0"},
+            "nav-link-selected": {"background-color": "#FF9900", "color": "#000000", "font-weight": "bold"},
+        },
+    )
+    if pnl_tab != st.session_state.pnl_tab:
+        st.session_state.pnl_tab = pnl_tab
+        st.rerun()
+
+    if pnl_tab == "일별 손익":
+        df_daily = load_and_clean_data(urls.get("DAILY", ""))
+        if not df_daily.empty:
+            df_daily = _clean_withdrawals_memos(df_daily)
+            st.markdown("<br><h4 style='color:#FF9900;'>📊 일별 실현손익 추이</h4>", unsafe_allow_html=True)
+            _render_pnl_bar_chart(df_daily, "일별 실현손익")
+            with st.expander("📋 일별 손익 상세 표", expanded=False):
+                st.dataframe(_style_pnl_dataframe(df_daily), use_container_width=True, hide_index=True)
+        else:
+            st.info("일별 손익 데이터를 불러오지 못했습니다.")
+
+    elif pnl_tab == "월별 손익":
+        df_monthly = load_and_clean_data(urls.get("MONTHLY", ""))
+        if not df_monthly.empty:
+            df_monthly = _clean_withdrawals_memos(df_monthly)
+            st.markdown("<br><h4 style='color:#FF9900;'>📊 월별 실현손익 추이</h4>", unsafe_allow_html=True)
+            _render_pnl_bar_chart(df_monthly, "월별 실현손익")
+            with st.expander("📋 월별 손익 상세 표", expanded=False):
+                st.dataframe(_style_pnl_dataframe(df_monthly), use_container_width=True, hide_index=True)
+        else:
+            st.info("월별 손익 데이터를 불러오지 못했습니다.")
+
+# =============================================================================
+# ── 탭 5: 시뮬레이터 ──
+# =============================================================================
+
+if menu == "대시보드":
+    
+    if "config" not in st.session_state:
+        st.session_state.config = load_config()
+        st.session_state.goal_amount_str = f"{int(st.session_state.config['goal_amount']):,}"
+        st.session_state.target_date_val = datetime.datetime.strptime(st.session_state.config['target_date'], "%Y-%m-%d").date()
+
+    def format_goal_amount():
+        val = st.session_state.goal_amount_input.replace(",", "")
+        try:
+            st.session_state.goal_amount_str = f"{int(val):,}"
+            st.session_state.config['goal_amount'] = str(int(val))
+            save_config(st.session_state.config)
+        except ValueError:
+            pass
+
+    def update_target_date():
+        st.session_state.target_date_val = st.session_state.target_date_input
+        st.session_state.config['target_date'] = st.session_state.target_date_input.strftime("%Y-%m-%d")
+        save_config(st.session_state.config)
+
+    try:
+        GOAL_AMOUNT = int(st.session_state.goal_amount_str.replace(",", ""))
+    except ValueError:
+        GOAL_AMOUNT = 10_000_000_000
+        
+    target_date = st.session_state.target_date_val
+    
+    d_days = (target_date - datetime.date.today()).days
+    
+    urls_dict = {
+        "DASHBOARD": URL_DASHBOARD,
+        "ACCOUNT": URL_ACCOUNT,
+        "RECORDS": URL_RECORDS,
+        "DAILY": URL_PNL_DAILY,
+        "MONTHLY": URL_PNL_MONTHLY
+    }
+    all_data = load_all_data(urls_dict)
+    
+    df_account = all_data.get("ACCOUNT", pd.DataFrame())
+    df_dash = all_data.get("DASHBOARD", pd.DataFrame())
+    df_daily = all_data.get("DAILY", pd.DataFrame())
+    df_monthly = all_data.get("MONTHLY", pd.DataFrame())
+    today_profit = 0
+    month_profit = 0
+    year_profit = 0
+    today_profit_pct = 0.0
+    
+    # ── 일별 데이터에서 직접 월별 집계 (손익현황_월별 시트 CSV export 불가 대체) ──
+    df_monthly_computed = pd.DataFrame()
+    if not df_daily.empty:
+        try:
+            _dc = df_daily.columns[0]
+            _pc = next((c for c in df_daily.columns if '실현손익' in str(c).replace(' ', '')), None)
+            _ac = next((c for c in df_daily.columns if '자산총액' in str(c).replace(' ', '') or '당일자산' in str(c).replace(' ', '')), None)
+            _cc = next((c for c in df_daily.columns if '매매비용' in str(c).replace(' ', '') or '당일매매' in str(c).replace(' ', '')), None)
+            if _pc:
+                _tmp = df_daily.copy()
+                _tmp['_date'] = pd.to_datetime(
+                    _tmp[_dc].astype(str).str.replace(' ', ''), format='%y.%m.%d.', errors='coerce'
+                )
+                _tmp[_pc] = pd.to_numeric(_tmp[_pc].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                if _ac:
+                    _tmp[_ac] = pd.to_numeric(_tmp[_ac].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                if _cc:
+                    _tmp[_cc] = pd.to_numeric(_tmp[_cc].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                _tmp = _tmp.dropna(subset=['_date'])
+                _tmp['_ym'] = _tmp['_date'].dt.to_period('M')
+                rows = []
+                for ym, grp in _tmp.groupby('_ym'):
+                    last_row = grp.sort_values('_date').iloc[-1]
+                    last_asset = int(last_row[_ac]) if _ac else 0
+                    sum_cost = int(grp[_cc].sum()) if _cc else 0
+                    sum_pnl = int(grp[_pc].sum())
+                    rows.append({'년-월': str(ym), '자산총액': last_asset, '매매비용': sum_cost, '실현손익': sum_pnl})
+                if rows:
+                    df_monthly_computed = pd.DataFrame(rows[::-1])  # 최신월 먼저
+        except:
+            pass
+    
+    # df_monthly_computed가 있으면 우선 사용, 없으면 기존 df_monthly 사용
+    if not df_monthly_computed.empty:
+        df_monthly = df_monthly_computed
+    
+    if not df_daily.empty:
+        try:
+            profit_col = next((c for c in df_daily.columns if '실현손익' in str(c).replace(' ', '')), df_daily.columns[2])
+            val_str = str(df_daily.iloc[0][profit_col]).replace(',', '')
+            today_profit = int(float(val_str))
+        except:
+            pass
+            
+    if not df_monthly.empty:
+        try:
+            profit_col = next((c for c in df_monthly.columns if '실현손익' in str(c).replace(' ', '')), df_monthly.columns[2])
+            val_str = str(df_monthly.iloc[0][profit_col]).replace(',', '')
+            month_profit = int(float(val_str))
+            
+            date_col = df_monthly.columns[0]
+            year_data = df_monthly[df_monthly[date_col].astype(str).str.contains(str(datetime.date.today().year), na=False)]
+            year_sum = 0
+            for v in year_data[profit_col]:
+                try:
+                    year_sum += int(float(str(v).replace(',', '')))
+                except: pass
+            year_profit = year_sum
+        except:
+            pass
+        
+    
+    # 동적 파싱으로 현황 요약 테이블 찾기
+    summary_start_row = 7
+    if not df_dash.empty:
+        for r in range(len(df_dash)):
+            if '현황요약' in str(df_dash.iloc[r, 0]).replace(' ', ''):
+                summary_start_row = r + 1
+                break
+                
+    total_assets = 0
+    if not df_dash.empty and len(df_dash) >= summary_start_row + 2:
+        val_str = str(df_dash.iloc[summary_start_row + 1, 1]).replace(',', '').strip()
+        try:
+            total_assets = int(float(val_str))
+        except ValueError:
+            total_assets = 0
+            
+    achievement_rate = (total_assets / GOAL_AMOUNT) * 100 if GOAL_AMOUNT > 0 else 0
+    progress_val = min(max(achievement_rate / 100, 0.0), 1.0)
+
+    # --- 스샷 2 UI 시작 ---
+    
+
+    if total_assets > 0:
+        base_asset = total_assets - today_profit
+        if base_asset > 0:
+            today_profit_pct = (today_profit / base_asset) * 100
+            
+    sign = "+" if today_profit > 0 else ""
+    color = "#FF1493" if today_profit < 0 else "#FF4B4B"
+    
+    month_profit_pct = 0.0
+    if total_assets > 0:
+        month_base_asset = total_assets - month_profit
+        if month_base_asset > 0:
+            month_profit_pct = (month_profit / month_base_asset) * 100
+            
+    month_sign = "+" if month_profit > 0 else ""
+    month_color = "#FF1493" if month_profit < 0 else "#FF4B4B"
+    
+    # ── 대시보드 반응형 1열 레이아웃 CSS ──
+    st.markdown("""
+    <style>
+    .block-container {
+        max-width: min(1200px, 90vw) !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        padding-top: 2rem !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+    .asset-card-stack { width: 100%; margin-bottom: 12px; position: relative; }
+
+    </style>
+    """, unsafe_allow_html=True)
+    if True:  # 대시보드 1열 시작
+        gs_val = st.session_state.gs_val
+        if 'target_date_dynamic' not in st.session_state:
+            _ucfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'user_config.json')
+            try:
+                with open(_ucfg_path, 'r') as _f:
+                    _ucfg = json.load(_f)
+                st.session_state.target_date_dynamic = datetime.datetime.strptime(_ucfg.get('goal_date', ''), '%Y-%m-%d').date()
+                st.session_state.gs_val = float(_ucfg.get('goal_amount_eok', st.session_state.gs_val))
+            except:
+                st.session_state.target_date_dynamic = datetime.date.today()
+        
+        target_date_dynamic = st.session_state.target_date_dynamic
+        if target_date_dynamic is None:
+            target_date_dynamic = datetime.date.today()
+            st.session_state.target_date_dynamic = target_date_dynamic
+        ach = min((total_assets / (gs_val*100000000)) * 100, 100.0) if gs_val > 0 else 0
+        d_days_dynamic = (target_date_dynamic - datetime.date.today()).days
+        formatted_gs_val = f"{gs_val:.1f}".rstrip('0').rstrip('.')
+
+        st.markdown(f'''<div class='glass-card-premium-blue' style='padding: 24px; padding-bottom:10px; margin-bottom: 0;'>
+<div style="text-align:center; padding-top:10px;">
+<div style="font-size:15px; color:#8ab4f8; font-weight:bold; margin-bottom:6px; letter-spacing:1px;">목표 {formatted_gs_val}억 &nbsp;|&nbsp; <span style="color:#FFFFFF; background-color:rgba(138,180,248,0.2); padding:2px 10px; border-radius:10px; font-weight:900;">D-{d_days_dynamic}</span></div>
+<div class="neon-pulse-blue">₩{int(total_assets):,}</div>
+        
+<div class="progress-track-blue">
+<div class="progress-fill-peach" style="width:{ach}%;"></div>
+</div>
+<div style="font-size:13px; color:#A0C0FF; font-weight:bold; display:flex; flex-wrap:nowrap; justify-content:flex-start; align-items:center; letter-spacing:0.5px;">
+<span style="color:#A0C0FF;">{ach:.2f}% 달성</span>
+</div>
+    </div>''', unsafe_allow_html=True)
+        
+        with st.expander("목표 재설정", expanded=False):
+            st.components.v1.html('''<script>
+const elements = parent.document.querySelectorAll('div[data-testid="stExpander"] details summary p');
+let goalExpander = null;
+elements.forEach(el => {
+    if (el.innerText.includes("목표 재설정")) {
+        el.style.fontSize = "80%";
+        el.style.opacity = "1.0";
+        goalExpander = el.closest('details');
+    }
+});
+if (goalExpander) {
+    const applyStyles = () => {
+        const buttons = goalExpander.querySelectorAll('button');
+        buttons.forEach(btn => {
+            btn.style.border = "1px solid rgba(255, 218, 185, 0.5)";
+        });
+    };
+    applyStyles();
+    const observer = new MutationObserver(applyStyles);
+    observer.observe(goalExpander, { childList: true, subtree: true });
+}
+</script>''', height=0)
+            
+            def add_to_goal(amount):
+                if 'goal_input_val' not in st.session_state:
+                    st.session_state.goal_input_val = int(st.session_state.gs_val * 100000000)
+                st.session_state.goal_input_val += amount
+                
+            def reset_goal():
+                st.session_state.goal_input_val = 0
+
+            if 'goal_input_val' not in st.session_state:
+                st.session_state.goal_input_val = int(st.session_state.gs_val * 100000000)
+
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                new_amt = st.number_input("목표 금액 (원)", step=100000000, key="goal_input_val")
+                
+                # 퀵 버튼 배치 (5열로 늘려서 초기화 버튼 추가)
+                bc0, bc1, bc2, bc3, bc4 = st.columns(5)
+                bc0.button("🔄 리셋", on_click=reset_goal, use_container_width=True)
+                bc1.button("+5천만", on_click=add_to_goal, args=(50000000,), use_container_width=True)
+                bc2.button("+1억", on_click=add_to_goal, args=(100000000,), use_container_width=True)
+                bc3.button("+10억", on_click=add_to_goal, args=(1000000000,), use_container_width=True)
+                bc4.button("+50억", on_click=add_to_goal, args=(5000000000,), use_container_width=True)
+
+                if new_amt != int(st.session_state.gs_val * 100000000):
+                    st.session_state.gs_val = new_amt / 100000000.0
+                    _ucfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'user_config.json')
+                    try:
+                        _ucfg = {}
+                        if os.path.exists(_ucfg_path):
+                            with open(_ucfg_path, 'r') as _f:
+                                _ucfg = json.load(_f)
+                        _ucfg['goal_amount_eok'] = st.session_state.gs_val
+                        _ucfg['goal_date'] = st.session_state.get('target_date_dynamic', datetime.date.today()).strftime('%Y-%m-%d')
+                        with open(_ucfg_path, 'w') as _f:
+                            json.dump(_ucfg, _f)
+                    except:
+                        pass
+                    st.rerun()
+
+            with sc2:
+                new_date = st.date_input(
+                    "목표일 설정",
+                    value=st.session_state.get('target_date_dynamic', datetime.date.today()),
+                    format="YYYY/MM/DD"
+                )
+                if new_date is None:
+                    new_date = datetime.date.today()
+                if new_date != st.session_state.get('target_date_dynamic', datetime.date.today()):
+                    st.session_state.target_date_dynamic = new_date
+                    _ucfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'user_config.json')
+                    try:
+                        _ucfg = {}
+                        if os.path.exists(_ucfg_path):
+                            with open(_ucfg_path, 'r') as _f:
+                                _ucfg = json.load(_f)
+                        _ucfg['goal_date'] = new_date.strftime('%Y-%m-%d')
+                        _ucfg['goal_amount_eok'] = st.session_state.gs_val
+                        with open(_ucfg_path, 'w') as _f:
+                            json.dump(_ucfg, _f)
+                    except:
+                        pass
+                    st.rerun()
+
+                # --- 실시간 목표 달성 시뮬레이터 ---
+                _current_asset = total_assets
+                _goal = st.session_state.goal_input_val
+                _target_date = st.session_state.get('target_date_dynamic', datetime.date.today())
+                _days_left = (_target_date - datetime.date.today()).days
+                
+                if _goal > 0 and _current_asset > 0 and _goal > _current_asset and _days_left > 0:
+                    _months_left = _days_left / 30.44
+                    _multiplier = _goal / _current_asset
+                    _req_monthly_rate = ((_multiplier ** (1 / _months_left)) - 1) * 100
+                    _sim_msg = f"💡 목표달성을 위해, <strong style='color:#FFDAB9;'>매월 평균 +{_req_monthly_rate:.2f}%</strong>의 복리수익이 필요해요"
+                elif _current_asset >= _goal and _goal > 0:
+                    _sim_msg = "💡 이미 목표 금액을 달성했습니다! 새로운 목표를 향해 도전해 보세요."
+                elif _days_left <= 0 and _goal > _current_asset:
+                    _sim_msg = "💡 목표일이 지났습니다. 목표일을 미래로 변경해 주십시오."
+                else:
+                    _sim_msg = "💡 목표 금액과 목표일을 설정하시면 필요한 월평균 수익률을 계산해 드립니다."
+                    
+                st.markdown(f"<div style='margin-top:20px; color:#8ab4f8; font-size:14px; letter-spacing:-0.5px;'>{_sim_msg}</div>", unsafe_allow_html=True)
+
+
+        # -- Toss Style Bar Chart --
+        try:
+            import pandas as pd
+            import datetime
+            import re as _re
+            _today = datetime.date.today()
+            _cur_year = _today.year
+
+            # ── 일별 시트에서 월별 자산이액 증감 계산 (실현+평가 자연 반영) ──
+            _dash_monthly_profits = {i: 0 for i in range(1, 13)}
+            _dash_monthly_rates = {i: 0.0 for i in range(1, 13)}
+            _dash_year_total = 0
+
+            if not df_daily.empty:
+                _dd = df_daily.copy()
+                _dc_d = _dd.columns[0]
+                _ac_d = next((c for c in _dd.columns if '당일자산' in str(c).replace(' ','') or '자산이액' in str(c).replace(' ','')), _dd.columns[1])
+                _dd['_date'] = pd.to_datetime(_dd[_dc_d].astype(str).str.replace(' ',''), format='%y.%m.%d.', errors='coerce')
+                _dd['_asset'] = pd.to_numeric(_dd[_ac_d].astype(str).str.replace(',',''), errors='coerce').fillna(0)
+                _dd = _dd.dropna(subset=['_date'])
+                _dd = _dd[_dd['_asset'] > 0]
+                _dd_year = _dd[_dd['_date'].dt.year == _cur_year].sort_values('_date')
+
+                # 전년도 마지막 자산이액 (기준점)
+                _dd_prev = _dd[_dd['_date'].dt.year == _cur_year - 1].sort_values('_date')
+                _prev_year_last_asset = int(_dd_prev.iloc[-1]['_asset']) if len(_dd_prev) > 0 else 0
+
+                # 월별 마지막 자산이액 집계
+                _monthly_last_asset = {}
+                for _m in range(1, 13):
+                    _m_rows = _dd_year[_dd_year['_date'].dt.month == _m]
+                    if len(_m_rows) > 0:
+                        _monthly_last_asset[_m] = int(_m_rows.sort_values('_date').iloc[-1]['_asset'])
+
+                # 월별 손익 = 당월말 자산 - 전월말 자산
+                _sorted_months = sorted(_monthly_last_asset.keys())
+                for _idx, _m in enumerate(_sorted_months):
+                    if _idx == 0:
+                        _base = _prev_year_last_asset
+                    else:
+                        _base = _monthly_last_asset.get(_sorted_months[_idx - 1], 0)
+                    _cur_asset = _monthly_last_asset[_m]
+                    _pnl = _cur_asset - _base
+                    _dash_monthly_profits[_m] = _pnl
+                    if _base > 0:
+                        _dash_monthly_rates[_m] = (_pnl / _base) * 100
+                    _dash_year_total += _pnl
+
+            # ── 차트 데이터 준비 ──
+            _cur_total_asset = _monthly_last_asset.get(max(_monthly_last_asset.keys()), total_assets) if _monthly_last_asset else total_assets
+            _goal_amount = gs_val * 100000000 if gs_val > 0 else 10000000000
+            _monthly_ach = {_m: (_a / _goal_amount) * 100 for _m, _a in _monthly_last_asset.items()}
+            _cur_ach = (total_assets / _goal_amount) * 100 if _goal_amount > 0 else 0
+
+            # ── SVG Area Line Chart 생성 함수 ──
+            def _make_area_svg(data_dict, c_left, c_right, y_fmt, chart_idx, c_bottom_right=None):
+                W, H = 460, 200
+                PAD_L, PAD_R, PAD_T, PAD_B = 48, 16, 20, 36
+                plot_w = W - PAD_L - PAD_R
+                plot_h = H - PAD_T - PAD_B
+                months = sorted([m for m in range(1, 13) if data_dict.get(m, 0) > 0])
+                if not months:
+                    return f'<svg viewBox="0 0 {W} {H}" style="width:100%;height:auto;display:block;"><rect width="{W}" height="{H}" fill="transparent" rx="10"/><text x="{W//2}" y="{H//2}" fill="#555" text-anchor="middle" font-size="13">데이터 없음</text></svg>'
+                vals = [data_dict.get(m, 0) for m in months]
+                y_max = max(vals) * 1.15 if max(vals) > 0 else 1
+                def xp(idx): return PAD_L + int(idx / max(len(months) - 1, 1) * plot_w)
+                def yp(v): return PAD_T + int((1 - v / y_max) * plot_h)
+                pts = [(xp(i), yp(data_dict.get(m, 0))) for i, m in enumerate(months)]
+                area_pts = f"{PAD_L},{H-PAD_B} " + " ".join(f"{x},{y}" for x, y in pts) + f" {pts[-1][0]},{H-PAD_B}"
+                line_pts = " ".join(f"{x},{y}" for x, y in pts)
+                
+                grad_id = f"grad_{chart_idx}"
+                mask_id = f"mask_{chart_idx}"
+                svg = f'<svg viewBox="0 0 {W} {H}" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg">'
+                svg += f'<defs>'
+                svg += f'  <linearGradient id="{grad_id}" x1="0%" y1="0%" x2="100%" y2="0%">'
+                svg += f'    <stop offset="0%" stop-color="{c_left}"/>'
+                svg += f'    <stop offset="100%" stop-color="{c_right}"/>'
+                svg += f'  </linearGradient>'
+                svg += f'  <radialGradient id="light_{chart_idx}" cx="100%" cy="0%" r="80%">'
+                svg += f'    <stop offset="0%" stop-color="#ffffff" stop-opacity="0.85"/>'
+                svg += f'    <stop offset="100%" stop-color="transparent" stop-opacity="0.0"/>'
+                svg += f'  </radialGradient>'
+                if c_bottom_right:
+                    svg += f'  <radialGradient id="mint_{chart_idx}" cx="90%" cy="65%" r="60%">'
+                    svg += f'    <stop offset="0%" stop-color="{c_bottom_right}" stop-opacity="0.42"/>'
+                    svg += f'    <stop offset="100%" stop-color="transparent" stop-opacity="0.0"/>'
+                    svg += f'  </radialGradient>'
+                svg += f'  <linearGradient id="fade_{mask_id}" x1="0%" y1="0%" x2="0%" y2="100%">'
+                svg += f'    <stop offset="0%" stop-color="white" stop-opacity="1.0"/>'
+                svg += f'    <stop offset="40%" stop-color="white" stop-opacity="0.7"/>'
+                svg += f'    <stop offset="85%" stop-color="white" stop-opacity="0.0"/>'
+                svg += f'    <stop offset="100%" stop-color="white" stop-opacity="0.0"/>'
+                svg += f'  </linearGradient>'
+                svg += f'  <mask id="{mask_id}">'
+                svg += f'    <rect width="{W}" height="{H}" fill="url(#fade_{mask_id})" />'
+                svg += f'  </mask>'
+                svg += f'</defs>'
+                svg += f'<rect width="{W}" height="{H}" fill="transparent" rx="10"/>'
+                for gi in range(5):
+                    gy = PAD_T + int(gi / 4 * plot_h)
+                    svg += f'<line x1="{PAD_L}" y1="{gy}" x2="{W-PAD_R}" y2="{gy}" stroke="#333" stroke-width="1"/>'
+                svg += f'<polygon points="{area_pts}" fill="url(#{grad_id})" mask="url(#{mask_id})"/>'
+                if c_bottom_right:
+                    svg += f'<polygon points="{area_pts}" fill="url(#mint_{chart_idx})" mask="url(#{mask_id})"/>'
+                svg += f'<polygon points="{area_pts}" fill="url(#light_{chart_idx})" mask="url(#{mask_id})"/>'
+                svg += f'<polyline points="{line_pts}" fill="none" stroke="#ffffff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 0 4px rgba(255,255,255,0.6))"/>'
+                for i, (m, (x, y)) in enumerate(zip(months, pts)):
+                    svg += f'<circle cx="{x}" cy="{y}" r="4" fill="#ffffff" stroke="#111" stroke-width="1.5"/>'
+                    lbl = y_fmt(data_dict.get(m, 0))
+                    svg += f'<text x="{x}" y="{y-15}" fill="#ffffff" text-anchor="middle" font-size="13" font-weight="bold" style="text-shadow: 0px 1px 3px rgba(0,0,0,0.9);">{lbl}</text>'
+                    svg += f'<text x="{x}" y="{H-PAD_B+14}" fill="#888" text-anchor="middle" font-size="11">{m}월</text>'
+                svg += '</svg>'
+                return svg
+
+            _svg_d1 = _make_area_svg(_monthly_last_asset, "#9E65B7", "#88C6E3", lambda v: f"{v/100000000:.1f}억", 1)
+            _svg_d2 = _make_area_svg(_monthly_ach, "#B76CDF", "#A9CC97", lambda v: f"{v:.1f}%", 2, "#95D5B2")
+
+            _charts_html = f"""
+<div style='display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap;'>
+  <div style='flex:1;min-width:280px;background:#000000;border:1px solid rgba(255, 218, 185, 0.5);border-radius:12px;padding:18px 16px 12px 16px;'>
+    <div style='margin-bottom:16px; white-space:nowrap;'>
+      <span style='color:#FFDAB9; font-size:14px; font-weight:300;'>월별 변화를 볼 수 있어요</span>
+    </div>
+    {_svg_d1}
+    <div style='color:#555;font-size:10px;margin-top:4px;text-align:right;'>월말 자산 추이</div>
+  </div>
+  <div style='flex:1;min-width:280px;background:#000000;border:1px solid rgba(255, 218, 185, 0.5);border-radius:12px;padding:18px 16px 12px 16px;'>
+    <div style='margin-bottom:16px; white-space:nowrap;'>
+      <span style='color:#FFDAB9; font-size:14px; font-weight:300;'>목표의 </span>
+      <span style='color:rgba(245, 245, 245, 0.85); font-size:20px; font-weight:900;'>{_cur_ach:.2f}</span>
+      <span style='color:#FFDAB9; font-size:14px; font-weight:300;'> % 달성 중이에요</span>
+    </div>
+    {_svg_d2}
+    <div style='color:#555;font-size:10px;margin-top:4px;text-align:right;'>월별 목표 달성률 추이</div>
+  </div>
+</div>
+"""
+            import re; st.markdown(re.sub(r'\n\s+', ' ', _charts_html), unsafe_allow_html=True)
+
+
+
+            
+        except Exception as e:
+            st.error(f"Error rendering toss chart: {e}")
+                
+    
+        
+    trading_days = max(1, int(np.busday_count(datetime.date.today(), target_date + datetime.timedelta(days=1))))
+    if total_assets > 0 and GOAL_AMOUNT > total_assets:
+        daily_req_amt = (GOAL_AMOUNT - total_assets) / trading_days
+        daily_req_rate = daily_req_amt / total_assets
+        monthly_req_rate = daily_req_rate * 21
+    else:
+        daily_req_rate = 0
+        monthly_req_rate = 0
+        daily_req_amt = 0
+    daily_req_rate_str = f"{daily_req_rate * 100:,.2f}%"
+    monthly_req_rate_str = f"{monthly_req_rate * 100:,.2f}%"
+    daily_req_amt_str = f"{int(daily_req_amt):,}"
+    
+    cur_month_profit_amt = "-"
+    cur_month_profit_rate = "-"
+    prev_month_profit_rate = "-"
+    prev_month_profit_amt = "-"
+    
+    def find_metric_multi(df, labels, col_offset=1):
+        for label in labels:
+            label_clean = label.replace(" ", "")
+            # Search in rows
+            for r in range(min(20, len(df))):
+                for c in range(min(20, len(df.columns))):
+                    val = str(df.iloc[r, c]).replace(" ", "")
+                    if label_clean in val and val != "":
+                        try:
+                            return str(df.iloc[r, c + col_offset]).strip()
+                        except:
+                            pass
+            # Search in headers
+            for c in range(min(20, len(df.columns))):
+                val = str(df.columns[c]).replace(" ", "")
+                if label_clean in val and val != "":
+                    try:
+                        return str(df.columns[c + col_offset]).strip()
+                    except:
+                        pass
+        return "-"
+
+    
+
+    def format_num(val):
+        if val == "-": return "-"
+        val_str = str(val).strip()
+        
+        prefix = ""
+        if val_str.startswith('+'): prefix = "+"
+        elif val_str.startswith('-'): prefix = "-"
+        elif val_str.startswith('▲'): prefix = "▲"
+        elif val_str.startswith('▼'): prefix = "▼"
+        
+        try:
+            fval = float(val_str.replace(',', '').replace('%', '').replace('+', '').replace('-', '').replace('▲', '').replace('▼', ''))
+            
+            if "%" in val_str:
+                formatted = f"{fval:,.2f}%"
+            elif fval.is_integer():
+                formatted = f"{int(fval):,}"
+            else:
+                formatted = f"{fval:,.1f}"
+                
+            return f"{prefix}{formatted}"
+        except:
+            return val_str
+
+    def extract_card_data(df, label_col_idx, val_col_idx, max_items=4):
+        extracted = []
+        if not df.empty and len(df.columns) > max(label_col_idx, val_col_idx):
+            # Check header
+            l = str(df.columns[label_col_idx]).strip()
+            v = str(df.columns[val_col_idx]).strip()
+            if "Unnamed" not in l and l != "" and str(l) != "nan" and str(l) != "0.0":
+                extracted.append((l, format_num(v)))
+            # Check rows
+            for i in range(min(5, len(df))):
+                l = str(df.iloc[i, label_col_idx]).strip()
+                v = str(df.iloc[i, val_col_idx]).strip()
+                if "Unnamed" not in l and l != "" and str(l) != "nan" and str(l) != "0.0":
+                    if str(v) != "nan" and v != "":
+                        extracted.append((l, format_num(v)))
+        return extracted[:max_items]
+    
+    goal_metrics = extract_card_data(df_dash, 8, 10)
+    profit_metrics = extract_card_data(df_dash, 11, 12)
+    market_metrics_1 = extract_card_data(df_dash, 13, 14, 4)
+    market_metrics_2 = extract_card_data(df_dash, 15, 16, 4)
+
+    def get_color(val_str):
+        val_str = str(val_str)
+        if '-' in val_str or '▼' in val_str: return '#1e90ff'
+        if '+' in val_str or '▲' in val_str: return '#ff4757'
+        return 'white'
+
+    def get_adx_color(val_str):
+        try:
+            val = float(str(val_str).replace('%', '').strip())
+            if val >= 40: return '#ff4757'
+            elif val >= 25: return '#feca57'
+            else: return '#2ed573'
+        except:
+            return 'white'
+
+    def render_metric_card(title, rows_list):
+        rows_html = ""
+        for label, val_text, val_color, val_bg, change_val in rows_list:
+            bg_style = f"background-color: {val_bg}; padding: 0 4px; border-radius: 3px;" if val_bg else ""
+            
+            # Format the change value UI if it exists
+            change_html = ""
+            if change_val and change_val != "-":
+                c_color = "#ff4757" if "+" in str(change_val) else ("#1e90ff" if "-" in str(change_val) else "#a0a0a0")
+                change_html = f"<span style='color: {c_color}; font-size: 12px; margin-left: 8px;'>{change_val}</span>"
+
+            rows_html += f"""
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+    <span style="color: #A0A0A0; font-size: 13px;">{label}</span>
+    <div style="text-align: right;">
+        <span style="color: {val_color}; {bg_style} font-size: 16px; font-weight: bold;">{val_text}</span>
+        {change_html}
+    </div>
+</div>
+"""
+        return f"""
+<div class="glass-card" style="padding: 20px; margin-bottom: 10px; min-height: 200px;">
+    <div style="color: #FF9900; font-size: 17px; font-weight: bold; margin-bottom: 15px;">{title}</div>
+    {rows_html}
+</div>
+"""
+
+    if True:  # 자산카드 1열 블록
+        # 구글 시트 대시보드 탭에서 자산 카드 데이터 동적 파싱
+        # 구조: summary_start_row 기준 헤더행=row+0, 평가금액=row+1, 평가손익=row+2, 수익률=row+3
+        # 컬럼: col0=항목명, col1=총합계, col2=주식, col3=금, col4=채권, col5=코인, col6=현금성
+        _cat_meta = [
+            ("주식",  2, "hover-coin", "#FF6B00"),
+            ("금",    3, "hover-gold",  "#f1c40f"),
+            ("채권",  4, "hover-bond",  "#00d8d6"),
+            ("코인",  5, "hover-stock",  "#1e90ff"),
+            ("현금성",6, "hover-cash",  "#6c5ce7"),
+        ]
+        def _parse_num(val):
+            try:
+                return float(str(val).replace(',', '').replace('%', '').strip())
+            except:
+                return 0.0
+
+        _asset_rows = []
+        try:
+            _amt_row  = summary_start_row + 1
+            _pft_row  = summary_start_row + 2
+            _pct_row  = summary_start_row + 3
+            for _cat, _col, _hover, _color in _cat_meta:
+                _amt = _parse_num(df_dash.iloc[_amt_row, _col])
+                _pft = _parse_num(df_dash.iloc[_pft_row, _col])
+                _pct = _parse_num(df_dash.iloc[_pct_row, _col])
+                _asset_rows.append({"category": _cat, "amount": _amt, "profit": _pft, "return_pct": _pct, "hover": _hover, "color": _color})
+        except Exception as _e:
+            # fallback: 하드코딩값
+            _asset_rows = [
+                {"category": "주식",  "amount": 1974918892, "profit": 255389985,  "return_pct": 14.85,  "hover": "hover-coin", "color": "#FF6B00"},
+                {"category": "금",    "amount": 142910490,  "profit": -17897045,  "return_pct": -11.13, "hover": "hover-gold",  "color": "#f1c40f"},
+                {"category": "채권",  "amount": 17516025,   "profit": -260227,    "return_pct": -1.46,  "hover": "hover-bond",  "color": "#00d8d6"},
+                {"category": "코인",  "amount": 298825354,  "profit": -71356901,  "return_pct": -19.28, "hover": "hover-stock",  "color": "#1e90ff"},
+                {"category": "현금성","amount": 396232726,  "profit": 0,          "return_pct": 0.0,    "hover": "hover-cash",  "color": "#6c5ce7"},
+            ]
+        df_asset = pd.DataFrame([
+            {"category": "주식", "amount": _asset_rows[0]["amount"], "profit": _asset_rows[0]["profit"], "return_pct": _asset_rows[0]["return_pct"], "hover": "hover-coin", "color": "#FF6B00"},
+            {"category": "금", "amount": _asset_rows[1]["amount"], "profit": _asset_rows[1]["profit"], "return_pct": _asset_rows[1]["return_pct"], "hover": "hover-gold", "color": "#f1c40f"},
+            {"category": "채권", "amount": _asset_rows[2]["amount"], "profit": _asset_rows[2]["profit"], "return_pct": _asset_rows[2]["return_pct"], "hover": "hover-bond", "color": "#00d8d6"},
+            {"category": "코인", "amount": _asset_rows[3]["amount"], "profit": _asset_rows[3]["profit"], "return_pct": _asset_rows[3]["return_pct"], "hover": "hover-stock", "color": "#1e90ff"},
+            {"category": "현금성", "amount": _asset_rows[4]["amount"], "profit": _asset_rows[4]["profit"], "return_pct": _asset_rows[4]["return_pct"], "hover": "hover-cash", "color": "#6c5ce7"},
+        ])
+        import random
+        cards_html = ""
+        for _, row in df_asset.iterrows():
+            p_sign = "+" if row['profit'] > 0 else ""
+            c_class = "profit-positive" if row['profit'] > 0 else ("profit-negative" if row['profit'] < 0 else "")
+            
+            ret_pct = row['return_pct']
+            
+            # Generate mock SVG sparkline based on return
+            pts = []
+            x_step = 60 / 5
+            y_start = 20 if ret_pct >= 0 else 10
+            y_curr = y_start
+            pts.append(f"0,{y_curr}")
+            
+            # simple random walk that trends up or down
+            for step in range(1, 6):
+                trend = -3 if ret_pct >= 0 else 3
+                noise = random.uniform(-4, 4)
+                y_curr += trend + noise
+                pts.append(f"{step * x_step:.1f},{y_curr:.1f}")
+            
+            path_d = "M " + " L ".join(pts)
+            
+            if ret_pct > 0:
+                stroke_color = "#FF4B4B" # Red
+            elif ret_pct < 0:
+                stroke_color = "#00BFFF" # Blue
+            else:
+                stroke_color = "#A0A0A0" # Gray
+            
+            # Using shadow filter for a neon effect on the line
+            sparkline = f'''
+            <div style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%); opacity: 0.9;">
+                <svg width="90" height="40" viewBox="0 0 60 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="{path_d}" stroke="{stroke_color}" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0px 0px 3px {stroke_color});"/>
+                </svg>
+            </div>
+            '''
+            
+            cards_html += f'''<div class="glass-card asset-card {row['hover']}" tabindex="0" style="outline:none;position:relative;padding-right:110px;background:rgba(181,165,140,0.1);"><div style="font-size:13px;color:#B5A58C;font-weight:bold;margin-bottom:5px;">🔹{row['category']}</div><div style="font-family:'Oswald', sans-serif;font-size:25px;letter-spacing:1px;font-weight:300;color:rgba(255, 255, 255, 0.85);margin-bottom:5px;white-space:nowrap;">₩{int(row['amount']):,}</div><div class="{c_class}" style="font-size:13px;">{p_sign}{int(row['profit']):,} ({p_sign}{row['return_pct']}%)</div>{sparkline}</div>'''
+        # 가로 스크롤 + chevron 표시
+        st.markdown(
+            f'<div class="swipe-wrapper" style="position:relative;">'
+            f'<div class="swipe-container">{cards_html}</div>'
+            f'<div class="swipe-glow-left hidden"></div>'
+            f'<div class="swipe-glow-right hidden"></div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+        import streamlit.components.v1 as components
+        components.html('''
+        <script>
+        (function(){
+            const doc = window.parent.document;
+            const container = doc.querySelector('.swipe-container');
+            if (!container) return;
+            if (!doc.getElementById('swipe-glow-style')) {
+                const style = doc.createElement('style');
+                style.id = 'swipe-glow-style';
+                style.innerHTML = `
+                .swipe-container::-webkit-scrollbar { display: none !important; }
+                .swipe-container { -ms-overflow-style: none; scrollbar-width: none; }
+                .swipe-glow-right, .swipe-glow-left {
+                    position: absolute;
+                    width: 32px !important; height: 32px !important;
+                    background-color: rgba(0, 0, 0, 0.6) !important;
+                    border: 1.5px solid rgba(0, 0, 0, 0.8) !important;
+                    border-radius: 50% !important;
+                    box-shadow: 0 0 15px rgba(0, 0, 0, 0.3);
+                    pointer-events: auto; cursor: pointer; opacity: 1;
+                    transition: opacity 0.3s ease-in-out;
+                    z-index: 50;
+                    transform: translateY(-50%);
+                    display: flex !important; align-items: center !important; justify-content: center !important;
+                }
+                .swipe-glow-right { right: 15px; }
+                .swipe-glow-left { left: 15px; }
+                
+                .swipe-glow-right::after, .swipe-glow-left::after {
+                    content: '';
+                    display: block;
+                    width: 14px; height: 14px;
+                }
+                .swipe-glow-right::after {
+                    border-top: 5px solid #FFFFFF;
+                    border-right: 5px solid #FFFFFF;
+                    animation: chevron-pulse-right 1.2s infinite alternate ease-in-out;
+                }
+                .swipe-glow-left::after {
+                    border-bottom: 5px solid #FFFFFF;
+                    border-left: 5px solid #FFFFFF;
+                    animation: chevron-pulse-left 1.2s infinite alternate ease-in-out;
+                }
+                
+                .swipe-glow-right.hidden, .swipe-glow-left.hidden { opacity: 0 !important; pointer-events: none; }
+                
+                @keyframes chevron-pulse-right {
+                    from { opacity:0.6; filter:drop-shadow(0 0 2px rgba(255,255,255,0.6)); transform: rotate(45deg) translate(-1px, 1px); }
+                    to   { opacity:1; filter:drop-shadow(0 0 6px rgba(255,255,255,1)); transform: rotate(45deg) translate(1px, -1px); }
+                }
+                @keyframes chevron-pulse-left {
+                    from { opacity:0.6; filter:drop-shadow(0 0 2px rgba(255,255,255,0.6)); transform: rotate(45deg) translate(1px, -1px); }
+                    to   { opacity:1; filter:drop-shadow(0 0 6px rgba(255,255,255,1)); transform: rotate(45deg) translate(-1px, 1px); }
+                }
+                `;
+                doc.head.appendChild(style);
+            }
+            const overlayRight = doc.querySelector('.swipe-glow-right');
+            const overlayLeft  = doc.querySelector('.swipe-glow-left');
+            const firstCard    = container.querySelector('.asset-card');
+            if (container && firstCard && overlayRight && overlayLeft) {
+                const updateBounds = () => {
+                    overlayRight.style.top = firstCard.offsetTop + (firstCard.offsetHeight / 2) + 'px';
+                    overlayLeft.style.top  = firstCard.offsetTop + (firstCard.offsetHeight / 2) + 'px';
+                };
+                const checkScroll = () => {
+                    if (container.scrollLeft + container.clientWidth >= container.scrollWidth - 10)
+                        overlayRight.classList.add('hidden');
+                    else overlayRight.classList.remove('hidden');
+                    if (container.scrollLeft <= 10) overlayLeft.classList.add('hidden');
+                    else overlayLeft.classList.remove('hidden');
+                };
+                container.addEventListener('scroll', checkScroll);
+                window.parent.addEventListener('resize', () => { updateBounds(); checkScroll(); });
+                setTimeout(() => { updateBounds(); checkScroll(); }, 300);
+                setTimeout(() => { updateBounds(); checkScroll(); }, 1200);
+
+                const cardWidth = firstCard.offsetWidth + 15;
+                overlayRight.addEventListener('click', () => {
+                    container.scrollBy({ left: cardWidth, behavior: 'smooth' });
+                });
+                overlayLeft.addEventListener('click', () => {
+                    container.scrollBy({ left: -cardWidth, behavior: 'smooth' });
+                });
+
+                const cards = container.querySelectorAll('.asset-card');
+                cards.forEach(card => {
+                    card.addEventListener('keydown', (e) => {
+                        if (e.key === 'ArrowRight') {
+                            e.preventDefault();
+                            container.scrollBy({ left: cardWidth, behavior: 'smooth' });
+                        } else if (e.key === 'ArrowLeft') {
+                            e.preventDefault();
+                            container.scrollBy({ left: -cardWidth, behavior: 'smooth' });
+                        }
+                    });
+                });
+            }
+        })();
+        </script>
+        ''', height=0)
+
+
+    
+        # -- 매크로 지표 expander --
+        with st.expander("매크로 지표", expanded=False):
+            st.components.v1.html('''<script>
+            const elements = parent.document.querySelectorAll('div[data-testid="stExpander"] details summary p');
+            elements.forEach(el => {
+                if (el.innerText.includes("매크로 지표")) {
+                    el.style.fontSize = "80%";
+                    el.style.color = "#FFDAB9";
+                }
+            });
+            </script>''', height=0)
+            try:
+                macro_changes = get_macro_changes()
+                pairs = []
+                
+                # 컬럼명(헤더)에 값이 들어간 경우를 위해 헤더도 검사
+                for lc, vc in [(13, 14), (15, 16)]:
+                    try:
+                        raw_lbl = str(df_dash.columns[lc]).replace('[','').replace(']','').strip()
+                        val = str(df_dash.columns[vc]).strip()
+                        if raw_lbl and raw_lbl != 'nan' and 'Unnamed' not in raw_lbl and val and val != 'nan' and val != '0.0':
+                            pairs.append((raw_lbl, val))
+                    except: pass
+
+                # 강건한 데이터행 추출 (헤더 무시)
+                for lc, vc in [(13, 14), (15, 16)]:
+                    for row_i in range(len(df_dash)):
+                        try:
+                            raw_lbl = str(df_dash.iloc[row_i, lc]).replace('[','').replace(']','').strip()
+                            val = str(df_dash.iloc[row_i, vc]).strip()
+                            if raw_lbl and raw_lbl != 'nan' and 'Unnamed' not in raw_lbl and val and val != 'nan' and val != '0.0':
+                                pairs.append((raw_lbl, val))
+                        except: pass
+                
+                # 순서 보장을 위해 중복 제거 및 8개만 선택
+                TARGET_ORDER = [
+                    '[미국10년국채금리]', '[장단기 금리차]', '[USD/KRW 환율]', '[USD/JPY 환율]',
+                    '[일본10년국채금리]', '[DXY]', '[XLF-QQQ괴리율]', '[ADX 추세강도]',
+                    '[하이일드 스프레드]', '[vix지수]'
+                ]
+                
+                # Map available pairs to a dictionary by target title
+                mapped_vals = {}
+                for raw_lbl, val in pairs:
+                    lbl = MACRO_TITLE_MAP.get(raw_lbl, raw_lbl)
+                    if lbl not in mapped_vals:
+                        mapped_vals[lbl] = val
+                
+                # Add default loading values for missing items
+                for t in TARGET_ORDER:
+                    if t not in mapped_vals:
+                        mapped_vals[t] = "로드 중..."
+                        
+                cards_html_list = []
+                for lbl in TARGET_ORDER:
+                    val = mapped_vals[lbl]
+                    
+                    change_str = ""
+                    if lbl in macro_changes:
+                        chg = macro_changes[lbl]
+                        if chg is not None and not __import__('pandas').isna(chg):
+                            sign = "+" if chg > 0 else ""
+                            change_color = "#FF4B4B" if chg > 0 else "#1e90ff"
+                            change_str = f' <span style="font-size:11px; font-weight:700; color:{change_color};">({sign}{chg:.2f})</span>'
+                    
+                    diff_color = 'color:white;'
+                    # Padding reduced to make boxes thinner as requested
+                    cards_html_list.append(f'<div style="background:#000000;border:1px solid rgba(255, 218, 185, 0.5);border-radius:10px;padding:6px 4px;text-align:center;"><div style="color:#a0a0a0;font-size:10.5px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-0.3px;">{lbl}</div><div style="{diff_color}font-size:13.5px;font-weight:bold;letter-spacing:-0.3px;">{val}{change_str}</div></div>')
+                
+                # 순서에 맞춰 2줄로 나눔 (5개씩)
+                row1 = "".join(cards_html_list[0:5])
+                row2 = "".join(cards_html_list[5:10])
+                
+                # Mobile shows 2 per line, desktop 5 per line
+                macro_grid_html = f'''
+                <style>
+                .macro-grid {{ display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin-bottom:6px; }}
+                @media(max-width:768px){{
+                    .macro-grid {{ grid-template-columns:repeat(3,1fr); }}
+                }}
+                </style>
+                <div class="macro-grid">{row1}</div>
+                <div class="macro-grid">{row2}</div>
+                '''
+                st.markdown(macro_grid_html, unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"매크로 지표 로딩 실패: {e}")
+
+    if True:  # 도넛 차트 1열 블록
+        if not df_dash.empty and len(df_dash) >= summary_start_row + 8:
+            df_summary_main = df_dash.iloc[summary_start_row+1:summary_start_row+5, 0:7].copy()
+            cols_main = df_dash.iloc[summary_start_row, 0:7].tolist()
+            cols_main = ["" if str(c).strip() == '0.0' else c for c in cols_main]
+            df_summary_main.columns = cols_main
+            df_summary_main.set_index(df_summary_main.columns[0], inplace=True)
+            
+            df_summary_sub = df_dash.iloc[summary_start_row+5:summary_start_row+9, 0:7].copy()
+            cols_sub = df_dash.iloc[summary_start_row, 0:7].tolist()
+            cols_sub = ["" if str(c).strip() == '0.0' else c for c in cols_sub]
+            df_summary_sub.columns = cols_sub
+            df_summary_sub.set_index(df_summary_sub.columns[0], inplace=True)
+            df_summary_sub.index = [str(df_dash.iloc[summary_start_row+5, 0]), str(df_dash.iloc[summary_start_row+6, 0]), str(df_dash.iloc[summary_start_row+7, 0]), str(df_dash.iloc[summary_start_row+8, 0])]
+            
+            try:
+                cats = df_summary_main.columns[1:].tolist()
+                amounts = df_summary_main.iloc[0, 1:].apply(lambda x: float(str(x).replace(',', '')) if str(x).strip() != '' else 0).tolist()
+                profits = df_summary_main.iloc[1, 1:].apply(lambda x: float(str(x).replace(',', '')) if str(x).strip() != '' else 0).tolist()
+                
+                df_asset_dynamic = pd.DataFrame({"category": cats, "amount": amounts, "profit": profits})
+                import plotly.graph_objects as go
+                # Render Waterfall directly
+                
+
+                # Render Sunburst directly
+                corp_amts = df_summary_sub.iloc[0, 1:].apply(lambda x: float(str(x).replace(',', '')) if str(x).strip() != '' else 0).tolist()
+                indi_amts = df_summary_sub.iloc[2, 1:].apply(lambda x: float(str(x).replace(',', '')) if str(x).strip() != '' else 0).tolist()
+                labels = ["총자산"]
+                parents = [""]
+                values = [0]
+                colors = [""]
+                color_map = {'주식': '#FFD700', '금': '#8e44ad', '채권': '#9b59b6', '코인': '#6c5ce7', '현금성': '#a29bfe', '개인': '#1A112A', '법인': '#2D1F44'}
+                for cat in cats:
+                    labels.append(cat)
+                    parents.append("총자산")
+                    values.append(0)
+                    colors.append(color_map.get(cat, '#888888'))
+                for i, cat in enumerate(cats):
+                    if indi_amts[i] > 0:
+                        labels.append(f"개인_{cat}")
+                        parents.append(cat)
+                        values.append(indi_amts[i])
+                        colors.append(color_map['개인'])
+                    if corp_amts[i] > 0:
+                        labels.append(f"법인_{cat}")
+                        parents.append(cat)
+                        values.append(corp_amts[i])
+                        colors.append(color_map['법인'])
+                fig_sb = go.Figure(go.Sunburst(labels=labels, parents=parents, values=values, marker=dict(colors=colors, line=dict(color='rgba(0,0,0,0)')), textinfo="label+percent parent", insidetextorientation='radial'))
+                fig_sb.update_layout(title=dict(text="자산비중", font=dict(color="#B5A58C", size=16)), margin=dict(t=50, b=20, l=20, r=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='white'), height=450)
+                
+                st.markdown("""
+                <svg style="width:0;height:0;position:absolute;" aria-hidden="true" focusable="false">
+                  <defs>
+                    <linearGradient id="goldGradient" x1="10%" y1="0%" x2="90%" y2="100%">
+                      <stop offset="0%" stop-color="#F2EFE1" />
+                      <stop offset="25%" stop-color="#B49E56" />
+                      <stop offset="50%" stop-color="#73562F" />
+                      <stop offset="75%" stop-color="#B49E56" />
+                      <stop offset="100%" stop-color="#F2EFE1" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+                <style>
+                path[style*="rgb(255, 215, 0)"], path[style*="rgb(255,215,0)"], path[fill="#FFD700" i] {
+                    fill: url(#goldGradient) !important;
+                }
+                path[style*="rgb(255, 215, 0)"]:hover, path[style*="rgb(255,215,0)"]:hover, path[fill="#FFD700" i]:hover {
+                    filter: drop-shadow(0px 0px 30px rgba(255, 255, 255, 1.0)) brightness(1.3) !important;
+                }
+                .js-plotly-plot .slice path {
+                    stroke: rgba(255, 255, 255, 0.1) !important;
+                    stroke-width: 1px !important;
+                    transform-origin: center;
+                }
+                .js-plotly-plot .slice path:hover {
+                    filter: brightness(1.1);
+                }
+                </style>
+                """, unsafe_allow_html=True)
+                
+                st.plotly_chart(fig_sb, use_container_width=True)
+            except Exception as e:
+                st.error(f"차트 렌더링 에러: {e}")
+                
+elif menu == "매매 기록":
+    urls_dict = {
+        "DASHBOARD": URL_DASHBOARD,
+        "ACCOUNT": URL_ACCOUNT,
+        "RECORDS": URL_RECORDS,
+        "DAILY": URL_PNL_DAILY,
+        "MONTHLY": URL_PNL_MONTHLY
+    }
+    render_trade_records(urls_dict)
+
+
+
+
+if __name__ == "__main__":
+    pass  # In Streamlit, no main block is strictly necessary for inline scripts
