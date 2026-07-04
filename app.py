@@ -29,8 +29,22 @@ if 'ty_val' not in st.session_state:
 st.set_page_config(page_title="금융 자산 대시보드", layout="wide", initial_sidebar_state="collapsed")
 
 # === [보안 PIN 잠금 화면 로직] ===
+import hashlib
+
+try:
+    _app_pin = str(st.secrets.get("APP_PIN", "1234"))
+except:
+    _app_pin = "1234"
+
+_expected_token = hashlib.sha256(_app_pin.encode()).hexdigest()[:16]
+
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
+
+# Check URL for token to bypass login on refresh
+if not st.session_state.authenticated:
+    if st.query_params.get("auth") == _expected_token:
+        st.session_state.authenticated = True
 
 if not st.session_state.authenticated:
     st.markdown('''
@@ -151,15 +165,9 @@ if not st.session_state.authenticated:
     with col2:
         pin = st.text_input("PIN", type="password", label_visibility="collapsed", key="pin_input")
         if pin:
-            app_pin = ""
-            try:
-                # secrets에서 PIN을 가져옴. 없으면 "1234"
-                app_pin = str(st.secrets.get("APP_PIN", "1234"))
-            except:
-                app_pin = "1234"
-                
-            if pin == app_pin:
+            if pin == _app_pin:
                 st.session_state.authenticated = True
+                st.query_params["auth"] = _expected_token
                 st.rerun()
             else:
                 st.error("❌ 비밀번호가 틀렸습니다.")
